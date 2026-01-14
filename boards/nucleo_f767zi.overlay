@@ -1,0 +1,180 @@
+
+/ {
+    aliases {
+        x-dir = &x_dir_node;
+        y-dir = &y_dir_node;
+        z-dir = &z_dir_node;
+
+        spindle-enable = &spindle_enable;
+        spindle-dir = &spindle_dir;
+        coolant = &coolant;
+        step-disable = &step_disable;
+        en-lv-shift = &en_lv_shift;
+
+        user-out-0 = &user_out_0;
+        user-out-1 = &user_out_1;
+        user-out-2 = &user_out_2;
+        user-out-3 = &user_out_3;
+
+        x-limit = &x_limit;
+        y-limit = &y_limit;
+        z-limit = &z_limit;
+
+        ctrl-reset = &ctrl_reset;
+        ctrl-feed-hold = &ctrl_feed_hold;
+        ctrl-cycle-start = &ctrl_cycle_start;
+        probe = &probe;
+    };
+
+    chosen {
+        zephyr,code-partition = &slot0_partition;
+        zephyr,settings-partition = &storage_partition;
+    };
+
+    outputs {
+        compatible = "gpio-leds";
+
+        x_dir_node: x_dir_node {
+            gpios = <&gpioa 4 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "X_DIR";
+        };
+        y_dir_node: y_dir_node {
+            gpios = <&gpiob 11 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "Y_DIR";
+        };
+        z_dir_node: z_dir_node {
+            gpios = <&gpioa 5 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "Z_DIR";
+        };
+
+        spindle_enable: spindle_enable {
+            gpios = <&gpiof 8 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "SPINDLE_ENABLE";
+        };
+        spindle_dir: spindle_dir {
+            gpios = <&gpiof 9 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "SPINDLE_DIR";
+        };
+        coolant: coolant {
+            gpios = <&gpiof 7 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "COOLANT";
+        };
+        step_disable: step_disable {
+            gpios = <&gpiof 6 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "STEP_DISABLE";
+        };
+        en_lv_shift: en_lv_shift {
+            gpios = <&gpiod 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "EN_LV_SHIFT";
+        };
+        user_out_0: user_out_0 {
+            gpios = <&gpiof 0 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "USER_OUTPUT_0";
+        };
+        user_out_1: user_out_1 {
+            gpios = <&gpiof 1 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "USER_OUTPUT_1";
+        };
+        user_out_2: user_out_2 {
+            gpios = <&gpiof 2 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "USER_OUTPUT_2";
+        };
+        user_out_3: user_out_3 {
+            gpios = <&gpiof 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            label = "USER_OUTPUT_3";
+        };
+    };
+
+    inputs {
+        compatible = "gpio-keys";
+
+        x_limit: x_limit {
+            gpios = <&gpioe 0 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "X_LIMIT";
+        };
+        y_limit: y_limit {
+            gpios = <&gpioe 10 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "Y_LIMIT";
+        };
+        z_limit: z_limit {
+            gpios = <&gpioe 2 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "Z_LIMIT";
+        };
+        ctrl_reset: ctrl_reset {
+            gpios = <&gpioe 3 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "CTRL_RESET";
+        };
+        ctrl_feed_hold: ctrl_feed_hold {
+            gpios = <&gpioe 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "CTRL_FEED_HOLD";
+        };
+        ctrl_cycle_start: ctrl_cycle_start {
+            gpios = <&gpioe 5 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "CTRL_CYCLE_START";
+        };
+        probe: probe {
+            gpios = <&gpioe 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "PROBE";
+        };
+    };
+};
+
+&usart3 {
+    status = "okay";
+    current-speed = <115200>;
+};
+
+&flash0 {
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+        /delete-node/ partition@10000;
+        /delete-node/ partition@20000;
+        /delete-node/ partition@40000;
+
+        slot0_partition: partition@c000 {
+            label = "image-0";
+            reg = <0x00000000 0x00100000>;
+        };
+
+        /*
+         * The flash starting at 0x000f8000 and ending at
+         * 0x000fffff is reserved for use by the application.
+         */
+
+        /*
+         * Storage partition will be used by FCB/LittleFS/NVS
+         * if enabled.
+         */
+        storage_partition: partition@100000 {
+            label = "storage";
+            reg = <0x000100000 0x0000C000>;
+        };
+    };
+};
+/*&pinctrl {
+
+    X_PULSE: tim2_ch3_pb10 {
+        pinmux = <STM32_PINMUX('B', 10, AF1)>;
+        drive-open-drain;
+        bias-pull-up;
+    };
+    Y_PULSE: tim2_ch4_pa3 {
+        pinmux = <STM32_PINMUX('A', 3, AF1)>;
+        drive-open-drain;
+        bias-pull-up;
+    };
+    Z_PULSE: tim5_ch1_pa0 {
+        pinmux = <STM32_PINMUX('A', 0, AF2)>;
+        drive-open-drain;
+        bias-pull-up;
+    };
+};
+
+&timers2 {
+    status = "okay";
+};
+&timers5 {
+    status = "okay";
+};*/

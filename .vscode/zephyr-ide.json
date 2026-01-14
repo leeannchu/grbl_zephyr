@@ -1,0 +1,32 @@
+{
+  "projects": {
+    "grbl_zephyr": {
+      "rel_path": "",
+      "name": "grbl_zephyr",
+      "buildConfigs": {
+        "build\\nucleo_f767zi": {
+          "relBoardDir": "boards",
+          "relBoardSubDir": "..\\..\\zephyrproject\\zephyr\\boards\\st\\nucleo_f767zi",
+          "board": "nucleo_f767zi",
+          "name": "build\\nucleo_f767zi",
+          "westBuildArgs": "",
+          "westBuildCMakeArgs": " -DCONFIG_DEBUG_OPTIMIZATIONS=y -DCONFIG_DEBUG_THREAD_INFO=y ",
+          "confFiles": {
+            "config": [],
+            "extraConfig": [],
+            "overlay": [],
+            "extraOverlay": []
+          },
+          "runnerConfigs": {}
+        }
+      },
+      "twisterConfigs": {},
+      "confFiles": {
+        "config": [],
+        "extraConfig": [],
+        "overlay": [],
+        "extraOverlay": []
+      }
+    }
+  }
+}

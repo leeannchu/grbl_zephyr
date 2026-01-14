@@ -1,0 +1,18 @@
+description: My Custom GRBL Driver
+
+compatible: "my,xyz-pulse"
+
+# 引入基礎定義
+include: base.yaml
+
+# 這裡就是「宣告變數型別」的地方
+properties:
+  timer-x-y:
+    type: phandle      # phandle 代表它指向另一個硬體節點 (如 &timers2)
+    required: true     # 強制規定一定要填寫
+    description: Timer for X/Y axis
+
+  timer-z:
+    type: phandle
+    required: true
+    description: Timer for Z axis

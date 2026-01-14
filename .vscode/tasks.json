@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "west build (nucleo_f767zi)",
+      "type": "shell",
+      "options": { "cwd": "C:/Users/ChuLeeann/zephyrproject" },
+      "command": "west build -p always -b nucleo_f767zi -d build C:/Users/ChuLeeann/grbl_zephyr",
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}
