@@ -1,0 +1,27 @@
+description: My Custom Stepper controller
+
+compatible: "grbl,stepper-controller"
+
+include: base.yaml
+
+properties:
+    timer:
+        type: phandle
+        required: true
+        description: Reference to the hardware timer
+
+    x-pulse-gpios:
+        type: phandle-array
+        required: true
+        description: GPIO pin for X axis step pulse
+
+    y-pulse-gpios:
+        type: phandle-array
+        required: true
+        description: GPIO pin for Y axis step pulse
+
+    z-pulse-gpios:
+        type: phandle-array
+        required: true
+        description: GPIO pin for Z axis step pulse
+  

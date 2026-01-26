@@ -1,26 +1,42 @@
 cmake_minimum_required(VERSION 3.20.0)
 
-set(DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/nucleo_f767zi.overlay)
+#set(DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/nucleo_f767zi.overlay)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(grbl_zephyr)
 
+set(GRBL_DIR "ThirdParty/grbl/grbl")
+set(CORE_DIR "Core")
+
 target_include_directories(app PRIVATE
-    Core/Inc               
-    ThirdParty/grbl/grbl   
+    ${CORE_DIR}/Inc               
+    ${GRBL_DIR}
+    drivers   
 )
 
-file(GLOB GRBL_SOURCES "ThirdParty/grbl/grbl/*.c")
+target_sources(app PRIVATE
+    ${CORE_DIR}/Src/main.c
+    drivers/grbl_stepper_controller.c
 
-list(REMOVE_ITEM GRBL_SOURCES
-    #"${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/grbl/grbl/stepper.c"          
-    #"${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/grbl/grbl/spindle_control.c" 
-    #"${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/grbl/grbl/eeprom.c"         
-)
-
-target_sources(app PRIVATE 
-  Core/Src/main.c
-  ${GRBL_SOURCES}
+    ${GRBL_DIR}/coolant_control.c
+    ${GRBL_DIR}/eeprom.c
+    ${GRBL_DIR}/gcode.c
+    ${GRBL_DIR}/io.c
+    ${GRBL_DIR}/jog.c 
+    ${GRBL_DIR}/limits.c
+    ${GRBL_DIR}/main.c
+    ${GRBL_DIR}/motion_control.c 
+    ${GRBL_DIR}/nuts_bolts.c
+    ${GRBL_DIR}/planner.c
+    ${GRBL_DIR}/print.c  
+    ${GRBL_DIR}/probe.c   
+    ${GRBL_DIR}/protocol.c 
+    ${GRBL_DIR}/report.c  
+    ${GRBL_DIR}/serial.c  
+    ${GRBL_DIR}/settings.c 
+    ${GRBL_DIR}/spindle_control.c  
+    ${GRBL_DIR}/stepper.c  
+    ${GRBL_DIR}/system.c     
 )
 
 target_compile_options(app PRIVATE

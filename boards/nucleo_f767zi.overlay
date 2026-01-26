@@ -24,6 +24,7 @@
         ctrl-feed-hold = &ctrl_feed_hold;
         ctrl-cycle-start = &ctrl_cycle_start;
         probe = &probe;
+
     };
 
     chosen {
@@ -153,28 +154,22 @@
         };
     };
 };
-/*&pinctrl {
-
-    X_PULSE: tim2_ch3_pb10 {
-        pinmux = <STM32_PINMUX('B', 10, AF1)>;
-        drive-open-drain;
-        bias-pull-up;
-    };
-    Y_PULSE: tim2_ch4_pa3 {
-        pinmux = <STM32_PINMUX('A', 3, AF1)>;
-        drive-open-drain;
-        bias-pull-up;
-    };
-    Z_PULSE: tim5_ch1_pa0 {
-        pinmux = <STM32_PINMUX('A', 0, AF2)>;
-        drive-open-drain;
-        bias-pull-up;
-    };
-};
 
 &timers2 {
     status = "okay";
 };
-&timers5 {
-    status = "okay";
-};*/
+
+/ {
+    stepper_controller: stepper_controller {
+        compatible = "grbl,stepper-controller";
+        status = "okay";
+
+        timer = <&timers2>;
+
+        x-pulse-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>;
+        y-pulse-gpios = <&gpioa 3 GPIO_ACTIVE_HIGH>;
+        z-pulse-gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+
+    };
+};
+

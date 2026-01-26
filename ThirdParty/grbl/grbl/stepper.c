@@ -1545,5 +1545,7 @@ uint8_t stepIsPulseDataExhausted(void) { return 1; }
 void stepper_pulse_generation_isr(void) {}
 void stepBlockAxis(uint8_t axis) {}
 
+void stepper_driver_interrupt_handler(void) {};
+
 #endif // ZEPHYR_ARCH
 #endif
