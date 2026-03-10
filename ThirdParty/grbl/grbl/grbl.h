@@ -52,6 +52,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 #define F_CPU 216000000
+#define F_TIM2_CLK 108000000 // TIM2 and TIM5 clock frequency on STM32F7xx is APB1 clock frequency
 #endif // ZEPHYR_ARCH
 
 /* type define */

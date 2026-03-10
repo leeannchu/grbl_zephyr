@@ -46,6 +46,7 @@
 #include <string.h>
 #include <zephyr/storage/flash_map.h>
 
+// Define the flash partition for NVS from the device tree.
 #define NVS_PARTITION storage_partition
 #define NVS_PARTITION_DEVICE FIXED_PARTITION_DEVICE(NVS_PARTITION)
 #define NVS_PARTITION_OFFSET FIXED_PARTITION_OFFSET(NVS_PARTITION)
@@ -57,6 +58,7 @@ static uint8_t eeprom_ram[EEPROM_SIZE];
 static struct nvs_fs fs;
 static bool is_initialized = false;
 
+// Initializes the NVS file system if it hasn't been already.
 static void check_init(void)
 {
 	if (is_initialized)
@@ -202,7 +204,7 @@ void memcpy_to_eeprom_with_checksum(unsigned int destination, char *source, unsi
 	}
 	eeprom_put_char(destination, checksum);
 #elif defined(ZEPHYR_ARCH)
-	check_init();
+	check_init(); // Ensure NVS is initialized.
 	unsigned char checksum = 0;
 	for (int i = 0; i < size; i++)
 	{

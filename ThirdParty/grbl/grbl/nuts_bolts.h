@@ -58,7 +58,7 @@
 // Conversions
 #define MM_PER_INCH (25.40f)
 #define INCH_PER_MM (0.0393701f)
-#define TICKS_PER_MICROSECOND (F_CPU / 1000000)
+#define TICKS_PER_MICROSECOND (F_TIM2_CLK / 1000000)
 
 #define DELAY_MODE_DWELL 0
 #define DELAY_MODE_SYS_SUSPEND 1
@@ -77,6 +77,14 @@
 #define bit_false(x, mask) (x) &= ~(mask)
 #define bit_istrue(x, mask) ((x & mask) != 0)
 #define bit_isfalse(x, mask) ((x & mask) == 0)
+
+// Only define max/min if not already defined (avoid conflict with Zephyr)
+#ifndef max
+#define max(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+#ifndef min
+#define min(a, b) (((a) < (b)) ? (a) : (b))
+#endif
 
 // Read a floating point value from a string. Line points to the input buffer, char_counter
 // is the indexer pointing to the current character of the line, while float_ptr is

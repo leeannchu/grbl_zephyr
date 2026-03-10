@@ -4,8 +4,8 @@
     {
       "label": "west build (nucleo_f767zi)",
       "type": "shell",
-      "options": { "cwd": "C:/Users/ChuLeeann/zephyrproject" },
-      "command": "west build -p always -b nucleo_f767zi -d build C:/Users/ChuLeeann/grbl_zephyr",
+      "options": { "cwd": "${env:USERPROFILE}/zephyrproject" },
+      "command": "west build -p always -b nucleo_f767zi -d build ${workspaceFolder}",
       "problemMatcher": ["$gcc"]
     }
   ]

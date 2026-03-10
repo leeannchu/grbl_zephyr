@@ -1,3 +1,5 @@
+
+#if 0
 #include <string.h>
 #include "stm32f7xx_timer_extension.h"
 #include "grbl.h"
@@ -1248,3 +1250,29 @@ static void TIM_DMADelayPulseCplt(DMA_HandleTypeDef *hdma)
 
     htim->Channel = HAL_TIM_ACTIVE_CHANNEL_CLEARED;
 }
+#endif
+
+// ========== Zephyr 版本的空實作 ==========
+#ifdef ZEPHYR_ARCH
+
+#include "grbl.h"
+
+void stepInit(void)
+{
+    // Hardware already initialized by Zephyr driver
+}
+
+void stepBlockAxis(uint8_t axis)
+{
+    // Limit protection handled in stepper interrupt
+    (void)axis;
+}
+
+uint8_t stepIsPulseDataExhausted(void)
+{
+    // Stub: Return 0 (not exhausted)
+    // Real implementation should use Zephyr synchronization primitives
+    return 0;
+}
+
+#endif // ZEPHYR_ARCH

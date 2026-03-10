@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.20.0)
 
-#set(DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/nucleo_f767zi.overlay)
-
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(grbl_zephyr)
 
@@ -16,6 +14,7 @@ target_include_directories(app PRIVATE
 
 target_sources(app PRIVATE
     ${CORE_DIR}/Src/main.c
+    ${CORE_DIR}/Src/step.c
     drivers/grbl_stepper_controller.c
 
     ${GRBL_DIR}/coolant_control.c

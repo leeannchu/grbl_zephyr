@@ -282,10 +282,13 @@ void mc_dwell(float seconds)
 #if defined(AVR_ARCH)
   delay_sec(seconds, DELAY_MODE_DWELL);
 #elif defined(ZEPHYR_ARCH)
+  // For Zephyr, implement a non-blocking dwell using k_msleep.
+  // This allows real-time commands to be processed during the dwell period.
 
   uint32_t delay_ms = (uint32_t)(seconds * 1000.0f);
   int64_t end_time = k_uptime_get() + delay_ms;
 
+  // Loop until the dwell time has elapsed.
   while (k_uptime_get() < end_time)
   {
     protocol_execute_realtime();
@@ -293,7 +296,7 @@ void mc_dwell(float seconds)
     {
       return;
     }
-    k_msleep(1);
+    k_msleep(1); // Yield the CPU for a short period to prevent busy-waiting.
   }
 #endif
 }

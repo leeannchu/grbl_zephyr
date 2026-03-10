@@ -19,8 +19,22 @@
   along with Grbl.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#if 0
 #include "grbl.h"
+
+#ifdef ZEPHYR_ARCH
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/kernel.h>
+#include "grbl_stepper_controller.h"
+
+static const struct device *stepper_dev = DEVICE_DT_GET(DT_NODELABEL(stepper_controller));
+static const struct gpio_dt_spec x_dir = GPIO_DT_SPEC_GET(DT_ALIAS(x_dir), gpios);
+static const struct gpio_dt_spec y_dir = GPIO_DT_SPEC_GET(DT_ALIAS(y_dir), gpios);
+static const struct gpio_dt_spec z_dir = GPIO_DT_SPEC_GET(DT_ALIAS(z_dir), gpios);
+static const struct gpio_dt_spec step_disable = GPIO_DT_SPEC_GET(DT_ALIAS(step_disable), gpios);
+static struct k_work_delayable stepper_disable_work; // Delayed work item for disabling stepper drivers after idle lock time
+static bool stepper_disable_scheduled = false; // Flag to track if the stepper disable work is already scheduled
+#endif
 
 // Some useful constants.
 #define DT_SEGMENT (1.0 / (ACCELERATION_TICKS_PER_SECOND * 60.0)) // min/segment
@@ -52,12 +66,12 @@
 #define AMASS_LEVEL2 (F_CPU / 4000)           // Over-drives ISR (x4)
 #define AMASS_LEVEL3 (F_CPU / 2000)           // Over-drives ISR (x8)
 #elif defined(ZEPHYR_ARCH)                    // F_CPU = 108MHz for STM32F7XX which is the clock frequency of APB1 for TIM2 and TIM5
-#define AMASS_LEVEL1 (uint32_t)(F_CPU / 8000) // Over-drives ISR (x2). Defined as F_CPU/(Cutoff frequency in Hz)
-#define AMASS_LEVEL2 (uint32_t)(F_CPU / 4000) // Over-drives ISR (x4)
-#define AMASS_LEVEL3 (uint32_t)(F_CPU / 2000) // Over-drives ISR (x8)
+#define AMASS_LEVEL1 (uint32_t)(F_TIM2_CLK / 8000) // Over-drives ISR (x2). Defined as F_CPU/(Cutoff frequency in Hz)
+#define AMASS_LEVEL2 (uint32_t)(F_TIM2_CLK / 4000) // Over-drives ISR (x4)
+#define AMASS_LEVEL3 (uint32_t)(F_TIM2_CLK / 2000) // Over-drives ISR (x8)
 
 #define MAX_FREQ 100000 // 100kHz
-#define MIN_CYCLES_PER_TICK (uint32_t)(F_CPU / MAX_FREQ)
+#define MIN_CYCLES_PER_TICK (uint32_t)(F_TIM2_CLK / MAX_FREQ)
 
 extern parser_state_t gc_state;
 #endif
@@ -67,13 +81,13 @@ error "AMASS must have 1 or more levels to operate correctly."
 #endif
 #endif
 
-    // Stores the planner block Bresenham algorithm execution data for the segments in the segment
+// Stores the planner block Bresenham algorithm execution data for the segments in the segment
     // buffer. Normally, this buffer is partially in-use, but, for the worst case scenario, it will
     // never exceed the number of accessible stepper buffer segments (SEGMENT_BUFFER_SIZE-1).
     // NOTE: This data is copied from the prepped planner blocks so that the planner blocks may be
     // discarded when entirely consumed and completed by the segment buffer. Also, AMASS alters this
     // data for its own use.
-    typedef struct
+typedef struct
 {
   uint32_t steps[N_AXIS];
   uint32_t step_event_count;
@@ -205,6 +219,25 @@ typedef struct
 } st_prep_t;
 static st_prep_t prep;
 
+#ifdef ZEPHYR_ARCH
+static void stepper_disable_work_handler(struct k_work *work) // Delayed work handler to disable stepper drivers after idle lock time
+{
+  if (!busy && segment_buffer_head == segment_buffer_tail) {
+    bool pin_state = true; // Disable steppers
+    
+    if (bit_istrue(settings.flags, BITFLAG_INVERT_ST_ENABLE))
+    {
+      pin_state = !pin_state;
+    }
+    if (gpio_is_ready_dt(&step_disable)) {
+      gpio_pin_set_dt(&step_disable, pin_state ? 1 : 0);
+    }
+  }
+  
+  stepper_disable_scheduled = false;
+}
+#endif
+
 /*    BLOCK VELOCITY PROFILE DEFINITION
           __________________________
          /|                        |\     _________________         ^
@@ -247,6 +280,24 @@ static st_prep_t prep;
 // enabled. Startup init and limits call this function but shouldn't start the cycle.
 void st_wake_up()
 {
+  // If the stepper disable work is scheduled, cancel it to prevent unintended disabling of steppers during active motion.
+  #ifdef ZEPHYR_ARCH
+  if (stepper_disable_scheduled) {
+    k_work_cancel_delayable(&stepper_disable_work);
+    stepper_disable_scheduled = false;
+  }
+
+  bool pin_state = false; // Enable steppers
+  if (bit_istrue(settings.flags, BITFLAG_INVERT_ST_ENABLE))
+  {
+    pin_state = !pin_state;
+  }
+  if (gpio_is_ready_dt(&step_disable)) {
+    gpio_pin_set_dt(&step_disable, pin_state ? 1 : 0);
+  }
+#endif
+
+#ifdef AVR_ARCH
   // Enable stepper drivers.
   if (bit_istrue(settings.flags, BITFLAG_INVERT_ST_ENABLE))
   {
@@ -257,7 +308,6 @@ void st_wake_up()
     STEPPERS_DISABLE_PORT &= ~(1 << STEPPERS_DISABLE_BIT);
   }
 
-#ifdef AVR_ARCH
   // Initialize stepper output bits to ensure first ISR call does not step.
   st.step_outbits = step_port_invert_mask;
 #endif
@@ -273,6 +323,7 @@ void st_wake_up()
 #if defined(AVR_ARCH)
   st.step_pulse_time = -(((settings.pulse_microseconds - 2) * TICKS_PER_MICROSECOND) >> 3);
 #elif defined(ZEPHYR_ARCH)
+  stepper_controller_set_pulse_width(stepper_dev, settings.pulse_microseconds); // Set step pulse width
   st.step_pulse_time = (uint32_t)((settings.pulse_microseconds) * TICKS_PER_MICROSECOND);
 #endif
 #endif
@@ -281,7 +332,9 @@ void st_wake_up()
 #if defined(AVR_ARCH)
   TIMSK1 |= (1 << OCIE1A);
 #elif defined(ZEPHYR_ARCH)
-  stepWakeUp();
+  // Kickstart timer with 1ms initial delay (1000 ticks at 1MHz)
+  stepper_controller_set_period(stepper_dev, 1000);
+  stepper_controller_enable_interrupt(stepper_dev);
 #endif // AVR_ARCH
 }
 
@@ -293,34 +346,47 @@ void st_go_idle()
   TIMSK1 &= ~(1 << OCIE1A);                                       // Disable Timer1 interrupt
   TCCR1B = (TCCR1B & ~((1 << CS12) | (1 << CS11))) | (1 << CS10); // Reset clock to no prescaling.
 #elif defined(ZEPHYR_ARCH)
-  stepDisablePulseCalculate();
+  stepper_controller_disable_interrupt(stepper_dev);
+  stepper_controller_reset_steps(stepper_dev);
 #endif // AVR_ARCH
 
   busy = false;
 
-  // Set stepper driver idle state, disabled or enabled, depending on settings and circumstances.
-  bool pin_state = false; // Keep enabled.
+ #if defined(ZEPHYR_ARCH)
+  if (stepper_disable_scheduled) {
+    k_work_cancel_delayable(&stepper_disable_work);
+    stepper_disable_scheduled = false;
+  }
+  
   if (((settings.stepper_idle_lock_time != 0xff) || sys_rt_exec_alarm || sys.state == STATE_SLEEP) && sys.state != STATE_HOMING)
   {
-    /**
-     * The delay_ms function call can be problematic in the context of RTOS.
-     * When the st_go_idle function is called from an ISR, the delay_ms function calling
-     * will fall into an failure assertion. This is because the delay_ms function is
-     * built from the FreeRTOS Notifier API, which is not allowed to be called from an ISR.
-     */
-    // Force stepper dwell to lock axes for a defined amount of time to ensure the axes come to a complete
-    // stop and not drift from residual inertial forces at the end of the last movement.
-    delay_ms(settings.stepper_idle_lock_time);
-    pin_state = true; // Override. Disable steppers.
-#ifdef ZEPHYR_ARCH
-    stepGoIdle();
-#endif // ZEPHYR_ARCH
+    k_work_schedule(&stepper_disable_work, K_MSEC(settings.stepper_idle_lock_time));
+    stepper_disable_scheduled = true;
   }
-
+  else
+  {
+    bool pin_state = false;
+    if (bit_istrue(settings.flags, BITFLAG_INVERT_ST_ENABLE))
+    {
+      pin_state = !pin_state;
+    }
+    if (gpio_is_ready_dt(&step_disable)) {
+      gpio_pin_set_dt(&step_disable, pin_state ? 1 : 0);
+    }
+  }
+  #elif defined(AVR_ARCH)
+  bool pin_state = false;
+  if (((settings.stepper_idle_lock_time != 0xff) || sys_rt_exec_alarm || sys.state == STATE_SLEEP) && sys.state != STATE_HOMING)
+  {
+    delay_ms(settings.stepper_idle_lock_time);
+    pin_state = true;
+  }
+  
   if (bit_istrue(settings.flags, BITFLAG_INVERT_ST_ENABLE))
   {
     pin_state = !pin_state;
-  } // Apply pin invert.
+  }
+  
   if (pin_state)
   {
     STEPPERS_DISABLE_PORT |= (1 << STEPPERS_DISABLE_BIT);
@@ -329,6 +395,7 @@ void st_go_idle()
   {
     STEPPERS_DISABLE_PORT &= ~(1 << STEPPERS_DISABLE_BIT);
   }
+  #endif
 }
 
 /* "The Stepper Driver Interrupt" - This timer interrupt is the workhorse of Grbl. Grbl employs
@@ -382,7 +449,7 @@ void st_go_idle()
 #if defined(AVR_ARCH)
 ISR(TIMER1_COMPA_vect)
 #elif defined(ZEPHYR_ARCH)
-void stepper_pulse_generation_isr()
+void stepper_driver_interrupt_handler(void)
 #endif
 {
   if (busy)
@@ -415,14 +482,12 @@ void stepper_pulse_generation_isr()
   TCNT0 = st.step_pulse_time; // Reload Timer0 counter
   TCCR0B = (1 << CS01);       // Begin Timer0. Full speed, 1/8 prescaler
 #elif defined(ZEPHYR_ARCH)
-  if (stepCalculatePulseData((uint32_t)&st) != HAL_OK)
-  {
-    // no more buffer to accommodate the pulse data in the step agent.
-    // delay 1 ms
-    vTaskDelay(1);
-    // stepDisablePulseCalculate();
-    return;
-  }
+  // Set the direction pins before we step the steppers
+  gpio_pin_set_dt(&x_dir, (st.dir_outbits & (1 << X_DIRECTION_BIT)) ? 1 : 0);
+  gpio_pin_set_dt(&y_dir, (st.dir_outbits & (1 << Y_DIRECTION_BIT)) ? 1 : 0);
+  gpio_pin_set_dt(&z_dir, (st.dir_outbits & (1 << Z_DIRECTION_BIT)) ? 1 : 0);
+  stepper_controller_set_steps(stepper_dev, st.step_outbits); // Set the step pins
+
 #endif // AVR_ARCH
 
   busy = true;
@@ -449,6 +514,9 @@ void stepper_pulse_generation_isr()
 #if defined(AVR_ARCH)
       // Initialize step segment timing per step and load number of steps to execute.
       OCR1A = st.exec_segment->cycles_per_tick;
+
+#elif defined(ZEPHYR_ARCH)
+      stepper_controller_set_period(stepper_dev, st.exec_segment->cycles_per_tick);
 #endif // AVR_ARCH
 
       st.step_count = st.exec_segment->n_step; // NOTE: Can sometimes be zero when moving slow.
@@ -481,18 +549,8 @@ void stepper_pulse_generation_isr()
     }
     else
     {
-#if defined(AVR_ARCH)
       // Segment buffer empty. Shutdown.
       st_go_idle();
-#elif defined(ZEPHYR_ARCH)
-      // inform the step agent in step.c
-      // that there is no more step to generate.
-      stepDisablePulseCalculate();
-
-      // clear output bits
-      st.step_outbits = step_port_invert_mask;
-      busy = false;
-#endif // AVR_ARCH
 
 #ifdef VARIABLE_SPINDLE
       // Ensure pwm is set properly upon completion of rate-controlled motion.
@@ -588,7 +646,7 @@ void stepper_pulse_generation_isr()
   if (st.counter_y > st.exec_block->step_event_count)
   {
     // set DEBUG_3_PIN high
-    UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_SET);
+    //UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_SET);
 
     st.step_outbits |= (1 << Y_STEP_BIT);
 #if defined(ENABLE_DUAL_AXIS) && (DUAL_AXIS_SELECT == Y_AXIS)
@@ -618,7 +676,7 @@ void stepper_pulse_generation_isr()
     }
 
     // set DEBUG_3_PIN low
-    UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_RESET);
+    //UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_RESET);
   }
 #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
   st.counter_z += st.steps[Z_AXIS];
@@ -662,7 +720,7 @@ void stepper_pulse_generation_isr()
   }
 
   // set DEBUG_4_PIN high
-  UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_SET);
+  //UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_SET);
   st.step_count--; // Decrement step events count
   if (st.step_count == 0)
   {
@@ -674,7 +732,7 @@ void stepper_pulse_generation_isr()
     }
   }
   // set DEBUG_4_PIN low
-  UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_RESET);
+  //UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_RESET);
 
   st.step_outbits ^= step_port_invert_mask; // Apply step port invert mask
 #ifdef ENABLE_DUAL_AXIS
@@ -776,7 +834,9 @@ void st_reset()
   // Initialize step and direction port pins.
   STEP_PORT = (STEP_PORT & ~STEP_MASK) | step_port_invert_mask;
   DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | dir_port_invert_mask;
-#elif defined(ZEPHYR_ARCH)
+#endif
+
+#ifndef ZEPHYR_ARCH
   // Initialize variables for the step agent
   stepInit();
 #endif // AVR_ARCH
@@ -819,6 +879,16 @@ void stepper_init()
   TIMSK0 |= (1 << OCIE0A); // Enable Timer0 Compare Match A interrupt
 #endif
 #elif defined(ZEPHYR_ARCH)
+  if (!device_is_ready(stepper_dev)) {
+      return;
+  }
+  if (gpio_is_ready_dt(&x_dir)) gpio_pin_configure_dt(&x_dir, GPIO_OUTPUT_INACTIVE);
+  if (gpio_is_ready_dt(&y_dir)) gpio_pin_configure_dt(&y_dir, GPIO_OUTPUT_INACTIVE);
+  if (gpio_is_ready_dt(&z_dir)) gpio_pin_configure_dt(&z_dir, GPIO_OUTPUT_INACTIVE);
+  if (gpio_is_ready_dt(&step_disable)) gpio_pin_configure_dt(&step_disable, GPIO_OUTPUT_ACTIVE);
+  
+  k_work_init_delayable(&stepper_disable_work, stepper_disable_work_handler);
+  stepper_disable_scheduled = false;
 #endif // AVR_ARCH
 }
 
@@ -906,12 +976,6 @@ void st_prep_buffer()
   // Block step prep buffer, while in a suspend state and there is no suspend motion to execute.
   if (bit_istrue(sys.step_control, STEP_CONTROL_END_MOTION))
   {
-    if (segment_buffer_tail != segment_buffer_head)
-    {
-      // still have some segments in the buffer need to be executed.
-      stepEnablePulseCalculate();
-    }
-
     return;
   }
 
@@ -933,13 +997,6 @@ void st_prep_buffer()
       }
       if (pl_block == NULL)
       {
-#if defined(ZEPHYR_ARCH)
-        if (segment_buffer_tail != segment_buffer_head)
-        {
-          // still have some segments in the buffer need to be executed.
-          stepEnablePulseCalculate();
-        }
-#endif
         return;
       } // No planner blocks. Exit.
 
@@ -1489,13 +1546,6 @@ void st_prep_buffer()
         plan_discard_current_block();
       }
     }
-
-#if defined(ZEPHYR_ARCH)
-    if (segment_buffer_tail == segment_next_head)
-    {
-      stepEnablePulseCalculate();
-    }
-#endif
   }
 }
 
@@ -1511,41 +1561,4 @@ float st_get_realtime_rate()
   }
   return 0.0f;
 }
-#endif
 
-#ifdef ZEPHYR_ARCH
-#include "grbl.h"
-
-#ifdef ZEPHYR_ARCH
-
-// --- 這些是讓 Linker 開心的空殼 ---
-
-void stepper_init(void) {}
-void st_disable(void) {}
-void st_reset(void) {}
-
-// --- 電源管理 ---
-void st_wake_up(void) {}
-void st_go_idle(void) {}
-
-// --- 緩衝區與規劃 ---
-void st_prep_buffer(void) {}
-// 注意參數型別：plan_block_t* (如果在 planner.h 有定義) 或 void*
-void st_update_plan_block_parameters(plan_block_t *block) {}
-
-// --- 方向與速度 ---
-void st_generate_step_dir_invert_masks(void) {}
-float st_get_realtime_rate(void) { return 0.0f; }
-
-// --- 脈衝生成檢查 ---
-// 回傳 1 (true) 騙過主程式，說我們已經沒步數要跑了，避免卡死
-uint8_t stepIsPulseDataExhausted(void) { return 1; }
-
-// --- 中斷處理 ---
-void stepper_pulse_generation_isr(void) {}
-void stepBlockAxis(uint8_t axis) {}
-
-void stepper_driver_interrupt_handler(void) {};
-
-#endif // ZEPHYR_ARCH
-#endif

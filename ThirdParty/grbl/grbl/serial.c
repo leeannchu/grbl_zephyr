@@ -42,7 +42,7 @@ volatile uint8_t serial_tx_buffer_tail = 0;
 #define UART_DEVICE_NODE DT_NODELABEL(usart3)
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
-void serial_glue_callback(const struct device *dev, void *user_data); /// 新宣告的轉接函式
+void serial_glue_callback(const struct device *dev, void *user_data); // Forward declaration for the glue callback function.
 
 #endif
 
@@ -111,7 +111,7 @@ void serial_init()
     return;
   }
 
-  // 設定回調跟啟用接收
+  // Set callback and enable reception
   uart_irq_callback_user_data_set(uart_dev, serial_glue_callback, NULL);
   uart_irq_rx_enable(uart_dev);
 #endif // ZEPHYR_ARCH
@@ -352,18 +352,23 @@ void serial_reset_read_buffer()
   serial_rx_buffer_tail = serial_rx_buffer_head;
 }
 
+// Glue callback for the Zephyr UART driver.
+// This function is called by the UART ISR.
 #if defined(ZEPHYR_ARCH)
 void serial_glue_callback(const struct device *dev, void *user_data)
 {
   uart_irq_update(dev);
 
+  // Handle incoming data (RX).
   while (1)
   {
     uint8_t rx_temp_buf[64];
+    // Read from the UART FIFO into a temporary buffer.
     int len = uart_fifo_read(dev, rx_temp_buf, sizeof(rx_temp_buf));
 
     if (len > 0)
     {
+      // Process each received byte.
       for (int i = 0; i < len; i++)
       {
         serial_rx_irq(rx_temp_buf[i]);
@@ -375,13 +380,16 @@ void serial_glue_callback(const struct device *dev, void *user_data)
     }
   }
 
+  // Handle outgoing data (TX) if the transmitter is ready.
   if (uart_irq_tx_ready(dev))
   {
+    // Transmit data from the software buffer until it's empty or the FIFO is full.
     while (serial_tx_buffer_head != serial_tx_buffer_tail)
     {
       uint8_t tail = serial_tx_buffer_tail;
       uint8_t data = serial_tx_buffer[tail];
 
+      // Fill the UART FIFO with one byte.
       int sent = uart_fifo_fill(dev, &data, 1);
 
       if (sent > 0)
@@ -399,7 +407,7 @@ void serial_glue_callback(const struct device *dev, void *user_data)
       }
     }
 
-    if (serial_tx_buffer_head == serial_tx_buffer_tail)
+    if (serial_tx_buffer_head == serial_tx_buffer_tail) // If the buffer is empty, disable the TX interrupt to prevent it from firing constantly.
     {
       uart_irq_tx_disable(dev);
     }

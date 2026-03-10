@@ -6,6 +6,7 @@
 #include <stm32f7xx_ll_gpio.h>
 #include <stm32f7xx_ll_bus.h>
 #include <zephyr/logging/log.h>
+#include "grbl.h"
 
 LOG_MODULE_REGISTER(grbl_stepper, CONFIG_GPIO_LOG_LEVEL);
 
@@ -47,6 +48,7 @@ void stepper_controller_set_steps(const struct device *dev, uint8_t step_mask);
 void stepper_controller_reset_steps(const struct device *dev);
 void stepper_controller_enable_interrupt(const struct device *dev);
 void stepper_controller_disable_interrupt(const struct device *dev);
+void stepper_controller_set_pulse_width(const struct device *dev, uint32_t microseconds);
 
 extern void stepper_driver_interrupt_handler(void); // function in stepper.c
 
@@ -54,6 +56,8 @@ extern void stepper_driver_interrupt_handler(void); // function in stepper.c
 struct stepper_controller_data
 {
     struct k_spinlock lock;
+    uint32_t flags;
+    uint32_t step_pulse_width_cycles;
 };
 
 /* configuration */
@@ -73,13 +77,23 @@ static void stepper_timer_isr(void *arg)
     // Check if the interrupt was triggered by Channel 1 (CC1)
     if (LL_TIM_IsActiveFlag_CC1(cfg->timer_instance))
     {
-
-        // Clear the interrupt flag immediately!
-        // If we don't do this, the ISR will trigger infinitely and hang the CPU.
+        // Clear the CC1 interrupt flag
         LL_TIM_ClearFlag_CC1(cfg->timer_instance);
 
         // Call the "Brain" of Grbl to calculate the next step
         stepper_driver_interrupt_handler();
+    }
+
+    // Check if the interrupt was triggered by Channel 2 (CC2) for step pulse reset
+    if (LL_TIM_IsActiveFlag_CC2(cfg->timer_instance))
+    {
+        LL_TIM_ClearFlag_CC2(cfg->timer_instance);
+        
+        // Reset the step pins to low after the pulse duration
+        stepper_controller_reset_steps(dev);
+
+        // Disable the CC2 interrupt until the next step
+        LL_TIM_DisableIT_CC2(cfg->timer_instance);
     }
 }
 
@@ -87,6 +101,9 @@ static void stepper_timer_isr(void *arg)
 static int stepper_controller_init(const struct device *dev)
 {
     const struct stepper_controller_config *cfg = dev->config;
+    struct stepper_controller_data *data = dev->data;
+    data->flags = 0;
+    data->step_pulse_width_cycles = (10 * (F_TIM2_CLK / 1000000)); // Default 10 microseconds
 
     for (int i = 0; i < 3; i++)
     {
@@ -99,51 +116,62 @@ static int stepper_controller_init(const struct device *dev)
     }
 
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM2); // Enable Timer Clock
+    LL_APB1_GRP1_ForceReset(LL_APB1_GRP1_PERIPH_TIM2); // Reset Timer
+    LL_APB1_GRP1_ReleaseReset(LL_APB1_GRP1_PERIPH_TIM2); // Release Reset
 
-    LL_TIM_SetPrescaler(cfg->timer_instance, 107); // Prescaler: 108 MHz / (107 + 1) = 1 MHz (1 tick = 1 microsecond)
+    LL_TIM_SetPrescaler(cfg->timer_instance, 0); // No prescaling, timer runs at full speed (System Core Clock)
+    LL_TIM_SetAutoReload(cfg->timer_instance, 0xFFFFFFFF); // Max 32-bit
+    LL_TIM_SetCounterMode(cfg->timer_instance, LL_TIM_COUNTERMODE_UP); // Upcounting mode
 
-    // Auto-Reload: Set to Max 32-bit value to prevent unwanted overflow resets
-    LL_TIM_SetAutoReload(cfg->timer_instance, 0xFFFFFFFF);
+    LL_TIM_SetCounter(cfg->timer_instance, 0); // Set Counter to 0
+    LL_TIM_OC_SetMode(cfg->timer_instance, LL_TIM_CHANNEL_CH1, LL_TIM_OCMODE_FROZEN); // Output Compare Mode: Frozen
+    LL_TIM_OC_SetMode(cfg->timer_instance, LL_TIM_CHANNEL_CH2, LL_TIM_OCMODE_FROZEN); // Output Compare Mode: Frozen
+    
+    LL_TIM_OC_SetCompareCH1(cfg->timer_instance, 0); // Initial Compare Value
+    LL_TIM_OC_SetCompareCH2(cfg->timer_instance, 0);
 
-    // Counter Mode: Up-counting (0, 1, 2...)
-    LL_TIM_SetCounterMode(cfg->timer_instance, LL_TIM_COUNTERMODE_UP);
-
-    // Initialize Counter value to 0
-    LL_TIM_SetCounter(cfg->timer_instance, 0);
-
-    // 4. Connect Interrupt (The most critical part!)
-    // This tells Zephyr: "When TIM2 hardware interrupt fires, run stepper_timer_isr()"
-    // TIM2_IRQn is the hardware signal number.
-    // Priority '0' means Highest Priority (Grbl needs this!).
-    IRQ_CONNECT(TIM2_IRQn, 0, stepper_timer_isr, DEVICE_DT_INST_GET(0), 0);
-
-    // Enable the interrupt in the NVIC (Nested Vector Interrupt Controller)
-    irq_enable(TIM2_IRQn);
-
-    // 5. Start the Timer!
-    // The timer starts counting now, but no interrupts will happen yet
-    // because we haven't called enable_interrupt() (CC1IE) yet.
-    LL_TIM_EnableCounter(cfg->timer_instance);
+    // Priority '0' means Highest Priority 
+    IRQ_CONNECT(TIM2_IRQn, 0, stepper_timer_isr, DEVICE_DT_INST_GET(0), 0); // Connect TIM2 Interrupt to stepper_timer_isr
+    LL_TIM_DisableIT_CC1(cfg->timer_instance);
+    LL_TIM_DisableIT_CC2(cfg->timer_instance);
+    LL_TIM_ClearFlag_CC1(cfg->timer_instance);
+    LL_TIM_ClearFlag_CC2(cfg->timer_instance);
+    irq_enable(TIM2_IRQn); // Enable TIM2 Interrupt in NVIC
+    LL_TIM_EnableCounter(cfg->timer_instance); // Start Timer
 
     return 0;
 }
 
+// Enable the stepper controller interrupt
 void stepper_controller_enable_interrupt(const struct device *dev)
 {
     const struct stepper_controller_config *cfg = dev->config;
     LL_TIM_EnableIT_CC1(cfg->timer_instance);
 }
 
+// Disable the stepper controller interrupt
 void stepper_controller_disable_interrupt(const struct device *dev)
 {
     const struct stepper_controller_config *cfg = dev->config;
     LL_TIM_DisableIT_CC1(cfg->timer_instance);
 }
 
+// Reset the Step bits to low for all axes
 void stepper_controller_reset_steps(const struct device *dev)
 {
-    LL_GPIO_ResetOutputPin(GPIOB, LL_GPIO_PIN_10);
-    LL_GPIO_ResetOutputPin(GPIOA, LL_GPIO_PIN_3 | LL_GPIO_PIN_0);
+    const struct stepper_controller_config *cfg = dev->config;
+    gpio_pin_set_dt(&cfg->step_gpios[0], 0);
+    gpio_pin_set_dt(&cfg->step_gpios[1], 0);
+    gpio_pin_set_dt(&cfg->step_gpios[2], 0);
+}
+
+// Set the step pulse width in microseconds
+void stepper_controller_set_pulse_width(const struct device *dev, uint32_t microseconds)
+{
+    struct stepper_controller_data *data = dev->data;
+    k_spinlock_key_t key = k_spin_lock(&data->lock);
+    data->step_pulse_width_cycles = microseconds * (F_TIM2_CLK / 1000000);
+    k_spin_unlock(&data->lock, key);
 }
 
 /* Set the delay (period) for the next timer interrupt */
@@ -165,20 +193,59 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
 /* Set the Step bits high for the axes specified in the mask */
 void stepper_controller_set_steps(const struct device *dev, uint8_t step_mask)
 {
+    if (step_mask == 0) {
+        return; // No steps to set
+    }
+
+    const struct stepper_controller_config *cfg = dev->config;
+    struct stepper_controller_data *data = dev->data;
+
+    k_spinlock_key_t key = k_spin_lock(&data->lock); // Lock to prevent concurrent access to timer and GPIOs
+
     if (step_mask & (1 << 0)) // X Axis(Bit 0)
     {
-        LL_GPIO_SetOutputPin(GPIOB, LL_GPIO_PIN_10);
+        gpio_pin_set_dt(&cfg->step_gpios[0], 1);
     }
 
     if (step_mask & (1 << 1)) // Y Axis (Bit 1)
     {
-        LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_3);
+        gpio_pin_set_dt(&cfg->step_gpios[1], 1);
     }
 
     if (step_mask & (1 << 2)) // Z Axis (Bit 2)
     {
-        LL_GPIO_SetOutputPin(GPIOA, LL_GPIO_PIN_0);
+        gpio_pin_set_dt(&cfg->step_gpios[2], 1);
     }
+
+    // Schedule the reset of the step pins after the pulse width duration
+    uint32_t current_cnt = LL_TIM_GetCounter(cfg->timer_instance);
+    uint32_t target_cnt = current_cnt + data->step_pulse_width_cycles;
+    
+    // Disable CC2 interrupt first in case it's still active from previous step
+    LL_TIM_DisableIT_CC2(cfg->timer_instance);
+    LL_TIM_ClearFlag_CC2(cfg->timer_instance);
+    
+    // Set the compare value for CC2
+    LL_TIM_OC_SetCompareCH2(cfg->timer_instance, target_cnt);
+    
+    // Check if we already passed the target time
+    uint32_t check_cnt = LL_TIM_GetCounter(cfg->timer_instance);
+    if ((int32_t)(check_cnt - target_cnt) >= 0)
+    {
+        // Already passed the target time, reset GPIO immediately
+        LOG_WRN("Pulse width setting too short for interrupt-based control, using direct reset. Missed by %u cycles", 
+                check_cnt - target_cnt);
+        gpio_pin_set_dt(&cfg->step_gpios[0], 0);
+        gpio_pin_set_dt(&cfg->step_gpios[1], 0);
+        gpio_pin_set_dt(&cfg->step_gpios[2], 0);
+    }
+    else
+    {
+        // Haven't passed yet, enable CC2 interrupt to reset later
+        LL_TIM_EnableIT_CC2(cfg->timer_instance);
+    }
+    
+    k_spin_unlock(&data->lock, key);
 }
 
 /* helper macro to define a new driver instance */

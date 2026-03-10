@@ -17,4 +17,6 @@ void stepper_controller_enable_interrupt(const struct device *dev);
 
 void stepper_controller_disable_interrupt(const struct device *dev);
 
+void stepper_controller_set_pulse_width(const struct device *dev, uint32_t microseconds);
+
 #endif // STEPPER_DRIVER_H
