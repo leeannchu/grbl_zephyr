@@ -11,6 +11,8 @@
 LOG_MODULE_REGISTER(grbl_stepper, CONFIG_GPIO_LOG_LEVEL);
 
 #define DT_DRV_COMPAT grbl_stepper_controller
+#define STEPPER_INST 0
+#define STEPPER_TIMER_IRQN DT_IRQN(DT_INST_PHANDLE(STEPPER_INST, timer))
 
 #if DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 0
 #error "Stepper Driver is enabled without any devices"
@@ -44,7 +46,7 @@ static int stepper_controller_init(const struct device *dev);
 static void stepper_timer_isr(void *arg);
 
 int stepper_controller_set_period(const struct device *dev, uint32_t cycles);
-void stepper_controller_set_steps(const struct device *dev, uint8_t step_mask);
+void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask);
 void stepper_controller_reset_steps(const struct device *dev);
 void stepper_controller_enable_interrupt(const struct device *dev);
 void stepper_controller_disable_interrupt(const struct device *dev);
@@ -131,12 +133,12 @@ static int stepper_controller_init(const struct device *dev)
     LL_TIM_OC_SetCompareCH2(cfg->timer_instance, 0);
 
     // Priority '0' means Highest Priority 
-    IRQ_CONNECT(TIM2_IRQn, 0, stepper_timer_isr, DEVICE_DT_INST_GET(0), 0); // Connect TIM2 Interrupt to stepper_timer_isr
+    IRQ_CONNECT(STEPPER_TIMER_IRQN, 0, stepper_timer_isr, DEVICE_DT_INST_GET(STEPPER_INST), 0); // Connect the timer interrupt to the ISR
     LL_TIM_DisableIT_CC1(cfg->timer_instance);
     LL_TIM_DisableIT_CC2(cfg->timer_instance);
     LL_TIM_ClearFlag_CC1(cfg->timer_instance);
     LL_TIM_ClearFlag_CC2(cfg->timer_instance);
-    irq_enable(TIM2_IRQn); // Enable TIM2 Interrupt in NVIC
+    irq_enable(STEPPER_TIMER_IRQN);
     LL_TIM_EnableCounter(cfg->timer_instance); // Start Timer
 
     return 0;
@@ -191,7 +193,7 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
 }
 
 /* Set the Step bits high for the axes specified in the mask */
-void stepper_controller_set_steps(const struct device *dev, uint8_t step_mask)
+void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
 {
     if (step_mask == 0) {
         return; // No steps to set
@@ -202,17 +204,17 @@ void stepper_controller_set_steps(const struct device *dev, uint8_t step_mask)
 
     k_spinlock_key_t key = k_spin_lock(&data->lock); // Lock to prevent concurrent access to timer and GPIOs
 
-    if (step_mask & (1 << 0)) // X Axis(Bit 0)
+    if (step_mask & (1U << X_STEP_BIT))   // X
     {
         gpio_pin_set_dt(&cfg->step_gpios[0], 1);
     }
 
-    if (step_mask & (1 << 1)) // Y Axis (Bit 1)
+    if (step_mask & (1U << Y_STEP_BIT))   // Y
     {
         gpio_pin_set_dt(&cfg->step_gpios[1], 1);
     }
 
-    if (step_mask & (1 << 2)) // Z Axis (Bit 2)
+    if (step_mask & (1U << Z_STEP_BIT))   // Z
     {
         gpio_pin_set_dt(&cfg->step_gpios[2], 1);
     }

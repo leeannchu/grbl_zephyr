@@ -745,6 +745,7 @@ void protocol_exec_rt_system()
 
 #if defined(ZEPHYR_ARCH)
   rt_exec = sys_rt_exec_user_defined;
+
   if (rt_exec)
   {
     // Execute and serial print status

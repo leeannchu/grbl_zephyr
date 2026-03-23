@@ -452,6 +452,10 @@ ISR(TIMER1_COMPA_vect)
 void stepper_driver_interrupt_handler(void)
 #endif
 {
+#if defined(ZEPHYR_ARCH)
+  uint32_t next_cycles_per_tick = 0;
+#endif
+
   if (busy)
   {
     return;
@@ -488,7 +492,7 @@ void stepper_driver_interrupt_handler(void)
   gpio_pin_set_dt(&z_dir, (st.dir_outbits & (1 << Z_DIRECTION_BIT)) ? 1 : 0);
   stepper_controller_set_steps(stepper_dev, st.step_outbits); // Set the step pins
 
-#endif // AVR_ARCH
+#endif // ZEPHYR_ARCH
 
   busy = true;
 
@@ -514,9 +518,6 @@ void stepper_driver_interrupt_handler(void)
 #if defined(AVR_ARCH)
       // Initialize step segment timing per step and load number of steps to execute.
       OCR1A = st.exec_segment->cycles_per_tick;
-
-#elif defined(ZEPHYR_ARCH)
-      stepper_controller_set_period(stepper_dev, st.exec_segment->cycles_per_tick);
 #endif // AVR_ARCH
 
       st.step_count = st.exec_segment->n_step; // NOTE: Can sometimes be zero when moving slow.
@@ -590,6 +591,11 @@ void stepper_driver_interrupt_handler(void)
       return;                                      // Nothing to do but exit.
     }
   }
+
+#if defined(ZEPHYR_ARCH)
+  // TIM2 compare event is one-shot. Re-arm every ISR to keep step ticks continuous.
+  next_cycles_per_tick = st.exec_segment->cycles_per_tick;
+#endif
 
   // Check probing state.
   if (sys_probe_state == PROBE_ACTIVE)
@@ -737,6 +743,9 @@ void stepper_driver_interrupt_handler(void)
   st.step_outbits ^= step_port_invert_mask; // Apply step port invert mask
 #ifdef ENABLE_DUAL_AXIS
   st.step_outbits_dual ^= step_port_invert_mask_dual;
+#endif
+#if defined(ZEPHYR_ARCH)
+  stepper_controller_set_period(stepper_dev, next_cycles_per_tick);
 #endif
   busy = false;
 }

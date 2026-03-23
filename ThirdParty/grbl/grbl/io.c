@@ -57,6 +57,8 @@ void io_init(void)
     CONFIG_PIN(y_dir);
     CONFIG_PIN(z_dir);
     CONFIG_PIN(en_lv_shift);
+
+    gpio_pin_set_dt(&en_lv_shift, 1); // Enable level shifter (ACTIVE_LOW: logical 1 = physical LOW = enabled)
 }
 
 void io_output_sync(uint8_t pin, uint8_t state)

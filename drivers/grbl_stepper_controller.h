@@ -9,7 +9,7 @@
 int stepper_controller_set_period(const struct device *dev, uint32_t cycles);
 
 /* Set the Step bits high for the axes specified in the mask */
-void stepper_controller_set_steps(const struct device *dev, uint8_t step_mask);
+void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask);
 
 void stepper_controller_reset_steps(const struct device *dev);
 

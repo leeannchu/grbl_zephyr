@@ -65,7 +65,7 @@
             label = "STEP_DISABLE";
         };
         en_lv_shift: en_lv_shift {
-            gpios = <&gpiod 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            gpios = <&gpiod 3 GPIO_ACTIVE_LOW>;
             label = "EN_LV_SHIFT";
         };
         user_out_0: user_out_0 {
@@ -157,6 +157,10 @@
 
 &timers2 {
     status = "okay";
+};
+
+&adc1 {
+    status = "disabled";
 };
 
 / {

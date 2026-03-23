@@ -22,8 +22,7 @@ void grbl_thread_entry(void *p1, void *p2, void *p3)
     ARG_UNUSED(p3);
     
     k_sem_take(&grbl_ready_sem, K_FOREVER);
-    printk("GRBL thread starting main loop\n"); 
-    
+
     mainGRBL();
 }
 
@@ -31,26 +30,19 @@ K_THREAD_DEFINE(grbl_thread_id, GRBL_STACKSIZE, grbl_thread_entry, NULL, NULL, N
 
 int main(void)
 {
-    printk("GRBL Zephyr Application Starting\n");
-    
+
     const struct device *stepper_dev = DEVICE_DT_GET(DT_NODELABEL(stepper_controller));
     
     if (!device_is_ready(stepper_dev)) {
-        printk("ERROR: Stepper controller not ready!\n");
         while (1) {
             k_msleep(1000);
         }
     }
     
-    printk("Stepper controller ready\n");
-    
     k_sem_give(&grbl_ready_sem);
-    printk("GRBL thread released\n");
     
-    uint32_t count = 0;
     while (1) {
         k_msleep(5000);
-        printk("System running... (%u)\n", count++);
     }
     
     return 0;
