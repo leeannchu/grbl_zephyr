@@ -60,6 +60,7 @@ struct stepper_controller_data
     struct k_spinlock lock;
     uint32_t flags;
     uint32_t step_pulse_width_cycles;
+    uint32_t last_cc1_fired;  // Timestamp of last CC1 interrupt (when CCR1 matched CNT)
 };
 
 /* configuration */
@@ -75,12 +76,23 @@ static void stepper_timer_isr(void *arg)
     // Retrieve the device configuration (to get the timer instance)
     const struct device *dev = (const struct device *)arg;
     const struct stepper_controller_config *cfg = dev->config;
+    struct stepper_controller_data *data = dev->data;
 
     // Check if the interrupt was triggered by Channel 1 (CC1)
     if (LL_TIM_IsActiveFlag_CC1(cfg->timer_instance))
     {
+        // Capture the exact CC1 time (when CNT matched CCR1) FIRST before any other work
+        // This is the reference point for the next period scheduling
+        // Read CCR1 register directly from the timer instance
+        uint32_t cc1_timestamp = cfg->timer_instance->CCR1;
+        
         // Clear the CC1 interrupt flag
         LL_TIM_ClearFlag_CC1(cfg->timer_instance);
+        
+        // Store the CC1 fire time for period calculation (will be used in set_period)
+        k_spinlock_key_t key = k_spin_lock(&data->lock);
+        data->last_cc1_fired = cc1_timestamp;
+        k_spin_unlock(&data->lock, key);
 
         // Call the "Brain" of Grbl to calculate the next step
         stepper_driver_interrupt_handler();
@@ -131,6 +143,8 @@ static int stepper_controller_init(const struct device *dev)
     
     LL_TIM_OC_SetCompareCH1(cfg->timer_instance, 0); // Initial Compare Value
     LL_TIM_OC_SetCompareCH2(cfg->timer_instance, 0);
+    
+    data->last_cc1_fired = 0; // Initialize CC1 fire timestamp
 
     // Priority '0' means Highest Priority 
     IRQ_CONNECT(STEPPER_TIMER_IRQN, 0, stepper_timer_isr, DEVICE_DT_INST_GET(STEPPER_INST), 0); // Connect the timer interrupt to the ISR
@@ -148,6 +162,12 @@ static int stepper_controller_init(const struct device *dev)
 void stepper_controller_enable_interrupt(const struct device *dev)
 {
     const struct stepper_controller_config *cfg = dev->config;
+    struct stepper_controller_data *data = dev->data;
+
+    k_spinlock_key_t key = k_spin_lock(&data->lock);
+    data->last_cc1_fired = LL_TIM_GetCounter(cfg->timer_instance); // Initialize to current time on enable
+    k_spin_unlock(&data->lock, key);
+
     LL_TIM_EnableIT_CC1(cfg->timer_instance);
 }
 
@@ -155,7 +175,15 @@ void stepper_controller_enable_interrupt(const struct device *dev)
 void stepper_controller_disable_interrupt(const struct device *dev)
 {
     const struct stepper_controller_config *cfg = dev->config;
+
     LL_TIM_DisableIT_CC1(cfg->timer_instance);
+    LL_TIM_DisableIT_CC2(cfg->timer_instance);
+    LL_TIM_ClearFlag_CC2(cfg->timer_instance);
+
+    // Ensure outputs are not left high when motion stops.
+    gpio_pin_set_dt(&cfg->step_gpios[0], 0);
+    gpio_pin_set_dt(&cfg->step_gpios[1], 0);
+    gpio_pin_set_dt(&cfg->step_gpios[2], 0);
 }
 
 // Reset the Step bits to low for all axes
@@ -182,12 +210,20 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
     const struct stepper_controller_config *cfg = dev->config;
     struct stepper_controller_data *data = dev->data;
     k_spinlock_key_t key = k_spin_lock(&data->lock);
-    uint32_t current_cnt = LL_TIM_GetCounter(cfg->timer_instance); // Get Current Time
-    // Note: We write to Capture/Compare Register 1 (CCR1).
-    //       When CNT matches CCR1, the hardware triggers the interrupt.
-    // Note: 32-bit overflow is automatically handled by the hardware logic.
-    LL_TIM_OC_SetCompareCH1(cfg->timer_instance, current_cnt + cycles);
-
+    
+    // Base the next compare point on the last CC1 fire time, not the current counter
+    // This eliminates ISR execution time from the period calculation
+    uint32_t next_cc1 = data->last_cc1_fired + cycles;
+    uint32_t current_cnt = LL_TIM_GetCounter(cfg->timer_instance);
+    
+    // Safety check: if the next point is already in the past, reschedule from now
+    if ((int32_t)(current_cnt - next_cc1) >= 0)
+    {
+        next_cc1 = current_cnt + cycles;
+    }
+    
+    LL_TIM_OC_SetCompareCH1(cfg->timer_instance, next_cc1);
+    
     k_spin_unlock(&data->lock, key);
     return 0;
 }
