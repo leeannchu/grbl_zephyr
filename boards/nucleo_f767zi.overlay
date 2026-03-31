@@ -69,19 +69,19 @@
             label = "EN_LV_SHIFT";
         };
         user_out_0: user_out_0 {
-            gpios = <&gpiof 0 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            gpios = <&gpiof 0 (GPIO_ACTIVE_LOW)>;
             label = "USER_OUTPUT_0";
         };
         user_out_1: user_out_1 {
-            gpios = <&gpiof 1 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            gpios = <&gpiof 1 (GPIO_ACTIVE_LOW)>;
             label = "USER_OUTPUT_1";
         };
         user_out_2: user_out_2 {
-            gpios = <&gpiof 2 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            gpios = <&gpiof 2 (GPIO_ACTIVE_LOW)>;
             label = "USER_OUTPUT_2";
         };
         user_out_3: user_out_3 {
-            gpios = <&gpiof 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+            gpios = <&gpiof 3 (GPIO_ACTIVE_LOW)>;
             label = "USER_OUTPUT_3";
         };
     };

@@ -36,6 +36,36 @@ static struct k_work_delayable stepper_disable_work; // Delayed work item for di
 static bool stepper_disable_scheduled = false; // Flag to track if the stepper disable work is already scheduled
 #endif
 
+
+// test the algorithm performance with a pin toggle
+#ifdef ZEPHYR_ARCH
+#define PERF_ISR_NODE DT_ALIAS(user_out_0)
+#define PERF_ALGO_NODE DT_ALIAS(user_out_3)
+static const struct gpio_dt_spec perf_isr = GPIO_DT_SPEC_GET(PERF_ISR_NODE, gpios);
+static const struct gpio_dt_spec perf_algo = GPIO_DT_SPEC_GET(PERF_ALGO_NODE, gpios);
+
+static inline void perf_isr_hi(void)
+{
+  (void)gpio_pin_set_dt(&perf_isr, 1);
+}
+
+static inline void perf_isr_lo(void)
+{
+  (void)gpio_pin_set_dt(&perf_isr, 0);
+}
+
+static inline void perf_algo_hi(void)
+{
+  (void)gpio_pin_set_dt(&perf_algo, 1);
+}
+
+static inline void perf_algo_lo(void)
+{
+  (void)gpio_pin_set_dt(&perf_algo, 0);
+}
+#endif
+///////////////////////////////////////////
+
 // Some useful constants.
 #define DT_SEGMENT (1.0 / (ACCELERATION_TICKS_PER_SECOND * 60.0)) // min/segment
 #define REQ_MM_INCREMENT_SCALAR 1.25
@@ -461,6 +491,11 @@ void stepper_driver_interrupt_handler(void)
     return;
   } // The busy-flag is used to avoid reentering this interrupt
 
+#if defined(ZEPHYR_ARCH)
+  // Total ISR window start: physical HIGH while handler is active.
+  perf_isr_lo();
+#endif
+
 #if defined(AVR_ARCH)
   // Set the direction pins a couple of nanoseconds before we step the steppers
   DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | (st.dir_outbits & DIRECTION_MASK);
@@ -609,6 +644,11 @@ void stepper_driver_interrupt_handler(void)
   st.step_outbits_dual = 0;
 #endif
 
+#if defined(ZEPHYR_ARCH)
+  // Measurement window start: physical HIGH while core algorithm executes.
+  perf_algo_lo();
+#endif
+
 // Execute step displacement profile by Bresenham line algorithm
 #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
   st.counter_x += st.steps[X_AXIS];
@@ -745,7 +785,13 @@ void stepper_driver_interrupt_handler(void)
   st.step_outbits_dual ^= step_port_invert_mask_dual;
 #endif
 #if defined(ZEPHYR_ARCH)
+  // Measurement window end: return to idle physical LOW.
+  perf_algo_hi();
+
   stepper_controller_set_period(stepper_dev, next_cycles_per_tick);
+
+  // Total ISR window end: return to idle physical LOW.
+  perf_isr_hi();
 #endif
   busy = false;
 }
@@ -895,10 +941,23 @@ void stepper_init()
   if (gpio_is_ready_dt(&y_dir)) gpio_pin_configure_dt(&y_dir, GPIO_OUTPUT_INACTIVE);
   if (gpio_is_ready_dt(&z_dir)) gpio_pin_configure_dt(&z_dir, GPIO_OUTPUT_INACTIVE);
   if (gpio_is_ready_dt(&step_disable)) gpio_pin_configure_dt(&step_disable, GPIO_OUTPUT_ACTIVE);
+
+  if (gpio_is_ready_dt(&perf_isr)) {
+    gpio_pin_configure_dt(&perf_isr, GPIO_OUTPUT_INACTIVE);
+    // With ACTIVE_LOW pin config, force idle physical LOW at boot.
+    perf_isr_hi();
+  }
   
+  // Configure performance algorithm pin if defined.
+  if (gpio_is_ready_dt(&perf_algo)) {
+    gpio_pin_configure_dt(&perf_algo, GPIO_OUTPUT_INACTIVE);
+    // With ACTIVE_LOW pin config, force idle physical LOW at boot.
+    perf_algo_hi();
+  }
+
   k_work_init_delayable(&stepper_disable_work, stepper_disable_work_handler);
   stepper_disable_scheduled = false;
-#endif // AVR_ARCH
+#endif // ZEPHYR_ARCH
 }
 
 /* ==================================================================================== */

@@ -10,6 +10,21 @@
 
 LOG_MODULE_REGISTER(grbl_stepper, CONFIG_GPIO_LOG_LEVEL);
 
+#define PERF_CC2_NODE DT_ALIAS(user_out_1)
+static const struct gpio_dt_spec perf_cc2 = GPIO_DT_SPEC_GET(PERF_CC2_NODE, gpios);
+
+// Helper functions to toggle the performance measurement pin in the CC2 ISR path
+static inline void perf_cc2_hi(void)
+{
+    (void)gpio_pin_set_dt(&perf_cc2, 1);
+}
+
+static inline void perf_cc2_lo(void)
+{
+    (void)gpio_pin_set_dt(&perf_cc2, 0);
+}
+//////////////////////////////////////////////
+
 #define DT_DRV_COMPAT grbl_stepper_controller
 #define STEPPER_INST 0
 #define STEPPER_TIMER_IRQN DT_IRQN(DT_INST_PHANDLE(STEPPER_INST, timer))
@@ -101,6 +116,9 @@ static void stepper_timer_isr(void *arg)
     // Check if the interrupt was triggered by Channel 2 (CC2) for step pulse reset
     if (LL_TIM_IsActiveFlag_CC2(cfg->timer_instance))
     {
+        // CC2 window start: physical HIGH while reset ISR path is active.
+        perf_cc2_lo();
+
         LL_TIM_ClearFlag_CC2(cfg->timer_instance);
         
         // Reset the step pins to low after the pulse duration
@@ -108,6 +126,9 @@ static void stepper_timer_isr(void *arg)
 
         // Disable the CC2 interrupt until the next step
         LL_TIM_DisableIT_CC2(cfg->timer_instance);
+
+        // CC2 window end: return to idle physical LOW.
+        perf_cc2_hi();
     }
 }
 
@@ -128,6 +149,15 @@ static int stepper_controller_init(const struct device *dev)
         }
         gpio_pin_configure_dt(&cfg->step_gpios[i], GPIO_OUTPUT_INACTIVE); // Configure pin as Output and set it to Inactive (Low) initially
     }
+
+    ///////////////////////////////
+    if (gpio_is_ready_dt(&perf_cc2))
+    {
+        gpio_pin_configure_dt(&perf_cc2, GPIO_OUTPUT_INACTIVE);
+        // With ACTIVE_LOW pin config, force idle physical LOW at boot.
+        perf_cc2_hi();
+    }
+    ////////////////////////////
 
     LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM2); // Enable Timer Clock
     LL_APB1_GRP1_ForceReset(LL_APB1_GRP1_PERIPH_TIM2); // Reset Timer
