@@ -26,6 +26,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include "grbl_stepper_controller.h"
+#include <stm32f7xx_ll_gpio.h>
 
 static const struct device *stepper_dev = DEVICE_DT_GET(DT_NODELABEL(stepper_controller));
 static const struct gpio_dt_spec x_dir = GPIO_DT_SPEC_GET(DT_ALIAS(x_dir), gpios);
@@ -148,6 +149,7 @@ typedef struct
 #endif
   IO_TYPE step_outbits; // The next stepping-bits to be output
   IO_TYPE dir_outbits;
+  IO_TYPE last_dir_outbits; // Cache last direction bits to reduce redundant GPIO writes
 #ifdef ENABLE_DUAL_AXIS
   uint8_t step_outbits_dual;
   uint8_t dir_outbits_dual;
@@ -486,10 +488,21 @@ void stepper_driver_interrupt_handler(void)
   TCNT0 = st.step_pulse_time; // Reload Timer0 counter
   TCCR0B = (1 << CS01);       // Begin Timer0. Full speed, 1/8 prescaler
 #elif defined(ZEPHYR_ARCH)
-  // Set the direction pins before we step the steppers
-  gpio_pin_set_dt(&x_dir, (st.dir_outbits & (1 << X_DIRECTION_BIT)) ? 1 : 0);
-  gpio_pin_set_dt(&y_dir, (st.dir_outbits & (1 << Y_DIRECTION_BIT)) ? 1 : 0);
-  gpio_pin_set_dt(&z_dir, (st.dir_outbits & (1 << Z_DIRECTION_BIT)) ? 1 : 0);
+  // Set the direction pins before we step the steppers, only if they have changed.
+  if (st.dir_outbits != st.last_dir_outbits) {
+    // X-Axis Direction
+    if (st.dir_outbits & (1 << X_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(x_dir.port, x_dir.pin); }
+    else { LL_GPIO_ResetOutputPin(x_dir.port, x_dir.pin); }
+
+    // Y-Axis Direction
+    if (st.dir_outbits & (1 << Y_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(y_dir.port, y_dir.pin); }
+    else { LL_GPIO_ResetOutputPin(y_dir.port, y_dir.pin); }
+
+    // Z-Axis Direction
+    if (st.dir_outbits & (1 << Z_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(z_dir.port, z_dir.pin); }
+    else { LL_GPIO_ResetOutputPin(z_dir.port, z_dir.pin); }
+    st.last_dir_outbits = st.dir_outbits;
+  }
   stepper_controller_set_steps(stepper_dev, st.step_outbits); // Set the step pins
 
 #endif // ZEPHYR_ARCH
@@ -838,6 +851,7 @@ void st_reset()
 
   st_generate_step_dir_invert_masks();
   st.dir_outbits = dir_port_invert_mask; // Initialize direction bits to default.
+  st.last_dir_outbits = ~st.dir_outbits; // Force direction bits to be written on first run
 
 #if defined(AVR_ARCH)
   // Initialize step and direction port pins.
