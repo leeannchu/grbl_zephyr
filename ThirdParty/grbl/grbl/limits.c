@@ -61,6 +61,20 @@ bool approach = true;
 #define DUAL_AXIS_CHECK_TRIGGER_2 bit(2)
 #endif
 
+// This is the Limit Pin Change Interrupt, which handles the hard limit feature. A bouncing
+// limit switch can cause a lot of problems, like false readings and multiple interrupt calls.
+// If a switch is triggered at all, something bad has happened and treat it as such, regardless
+// if a limit switch is being disengaged. It's impossible to reliably tell the state of a
+// bouncing pin because the Arduino microcontroller does not retain any state information when
+// detecting a pin change. If we poll the pins in the ISR, you can miss the correct reading if the
+// switch is bouncing.
+// NOTE: Do not attach an e-stop to the limit pins, because this interrupt is disabled during
+// homing cycles and will not respond correctly. Upon user request or need, there may be a
+// special pinout for an e-stop, but it is generally recommended to just directly connect
+// your e-stop switch to the Arduino reset pin, since it is the most correct way to do this.
+
+// limits_callback() in zephyr
+
 #ifdef ZEPHYR_ARCH
 void limits_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
@@ -266,118 +280,6 @@ uint8_t limits_get_state()
 
   return (limit_state);
 }
-
-// This is the Limit Pin Change Interrupt, which handles the hard limit feature. A bouncing
-// limit switch can cause a lot of problems, like false readings and multiple interrupt calls.
-// If a switch is triggered at all, something bad has happened and treat it as such, regardless
-// if a limit switch is being disengaged. It's impossible to reliably tell the state of a
-// bouncing pin because the Arduino microcontroller does not retain any state information when
-// detecting a pin change. If we poll the pins in the ISR, you can miss the correct reading if the
-// switch is bouncing.
-// NOTE: Do not attach an e-stop to the limit pins, because this interrupt is disabled during
-// homing cycles and will not respond correctly. Upon user request or need, there may be a
-// special pinout for an e-stop, but it is generally recommended to just directly connect
-// your e-stop switch to the Arduino reset pin, since it is the most correct way to do this.
-
-// limits_callback() in zephyr
-#if 0
-#ifndef ENABLE_SOFTWARE_DEBOUNCE
-
-#if defined(AVR_ARCH)
-ISR(LIMIT_INT_vect) // DEFAULT: Limit pin change interrupt process.
-{
-#elif defined(ZEPHYR_ARCH)
-void limits_isr(uint16_t GPIO_Pin)
-{
-  /**
-   * NOTE: The ZEPHYR_ARCH generates pulsed by timer's output compare mode
-   *       where the state of output pins is toggled when match occurs
-   *       instead of controlling the state of the output pins directly.
-   *       However, in homing process, GRBL is designated to control the state
-   *       of the output pins directly. It would not function correctly in this case.
-   *       Therefore, here, we put an eye on the state of those limit pins
-   *       and force the output pin of the axis whose limit pin is triggered to be low.
-   */
-  if ((sys.state == STATE_HOMING))
-  {
-    // find the axis whose limit pin is triggered
-    uint8_t axis = NUM_DIMENSIONS;
-
-    if (GPIO_Pin & (1 << X_LIMIT_BIT))
-    {
-      axis = X_AXIS;
-    }
-    else if (GPIO_Pin & (1 << Y_LIMIT_BIT))
-    {
-      axis = Y_AXIS;
-    }
-    else if (GPIO_Pin & (1 << Z_LIMIT_BIT))
-    {
-      axis = Z_AXIS;
-    }
-
-    if ((axis < NUM_DIMENSIONS) && ((sys.homing_axis_lock & get_step_pin_mask(axis)) > 0) && approach)
-    {
-      // block the axis
-      stepBlockAxis(axis);
-
-      // set the limit switch triggered flag
-      limitSwitchTriggered |= (1 << axis);
-    }
-
-    return;
-  }
-#endif // AVR_ARCH
-  // Ignore limit switches if already in an alarm state or in-process of executing an alarm.
-  // When in the alarm state, Grbl should have been reset or will force a reset, so any pending
-  // moves in the planner and serial buffers are all cleared and newly sent blocks will be
-  // locked out until a homing cycle or a kill lock command. Allows the user to disable the hard
-  // limit setting if their limits are constantly triggering after a reset and move their axes.
-  if (sys.state != STATE_ALARM)
-  {
-    if (!(sys_rt_exec_alarm))
-    {
-#ifdef HARD_LIMIT_FORCE_STATE_CHECK
-      // Check limit pin state.
-      if (limits_get_state())
-      {
-        mc_reset();                                   // Initiate system kill.
-        system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
-      }
-#else
-      mc_reset();                                   // Initiate system kill.
-      system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
-#endif
-    }
-  }
-}
-#else // OPTIONAL: Software debounce limit pin routine.
-// Upon limit pin change, enable watchdog timer to create a short delay.
-ISR(LIMIT_INT_vect)
-{
-  if (!(WDTCSR & (1 << WDIE)))
-  {
-    WDTCSR |= (1 << WDIE);
-  }
-}
-ISR(WDT_vect) // Watchdog timer ISR
-{
-  WDTCSR &= ~(1 << WDIE); // Disable watchdog timer.
-  if (sys.state != STATE_ALARM)
-  { // Ignore if already in alarm state.
-    if (!(sys_rt_exec_alarm))
-    {
-      // Check limit pin state.
-      if (limits_get_state())
-      {
-        mc_reset();                                   // Initiate system kill.
-        system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
-      }
-    }
-  }
-}
-#endif
-#endif
 
 // Homes the specified cycle axes, sets the machine position, and performs a pull-off motion after
 // completing. Homing is a special motion case, which involves rapid uncontrolled stops to locate

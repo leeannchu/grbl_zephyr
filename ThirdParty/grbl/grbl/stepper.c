@@ -642,7 +642,7 @@ void stepper_driver_interrupt_handler(void)
     else
     {
       sys_position[X_AXIS]++;
-#if defined(ZEPHYR_ARCH)
+/*#if defined(ZEPHYR_ARCH)
       // check if homing cycle is active
       if (sys.state != STATE_HOMING)
       {
@@ -654,7 +654,7 @@ void stepper_driver_interrupt_handler(void)
           system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
         }
       }
-#endif
+#endif*/
     }
   }
 #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
@@ -679,7 +679,7 @@ void stepper_driver_interrupt_handler(void)
     else
     {
       sys_position[Y_AXIS]++;
-#if defined(ZEPHYR_ARCH)
+/*#if defined(ZEPHYR_ARCH)
       // check if homing cycle is active
       if (sys.state != STATE_HOMING)
       {
@@ -691,7 +691,7 @@ void stepper_driver_interrupt_handler(void)
           system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
         }
       }
-#endif
+#endif*/
     }
 
     // set DEBUG_3_PIN low
@@ -713,7 +713,7 @@ void stepper_driver_interrupt_handler(void)
     else
     {
       sys_position[Z_AXIS]++;
-#if defined(ZEPHYR_ARCH)
+/*#if defined(ZEPHYR_ARCH)
       // check if homing cycle is active
       if (sys.state != STATE_HOMING)
       {
@@ -725,7 +725,7 @@ void stepper_driver_interrupt_handler(void)
           system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
         }
       }
-#endif
+#endif*/
     }
   }
 
