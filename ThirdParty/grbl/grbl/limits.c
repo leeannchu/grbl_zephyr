@@ -539,18 +539,11 @@ void limits_go_home(uint8_t cycle_mask)
         {
           system_set_exec_alarm(EXEC_ALARM_HOMING_FAIL_DOOR);
         }
-        // Homing failure condition: Limit switch still engaged after pull-off motion
-#if defined(AVR_ARCH)
+        // Homing failure condition: Limit switch still engaged after pull-off motion.
         if (!approach && (limits_get_state() & cycle_mask))
         {
           system_set_exec_alarm(EXEC_ALARM_HOMING_FAIL_PULLOFF);
         }
-#elif defined(ZEPHYR_ARCH)
-        if (!approach && (limits_get_state() & cycle_mask) && stepIsPulseDataExhausted())
-        {
-          system_set_exec_alarm(EXEC_ALARM_HOMING_FAIL_PULLOFF);
-        }
-#endif
         // Homing failure condition: Limit switch not found during approach.
         if (approach && (rt_exec & EXEC_CYCLE_STOP))
         {
@@ -562,12 +555,7 @@ void limits_go_home(uint8_t cycle_mask)
           mc_reset(); // Stop motors, if they are running.
           protocol_execute_realtime();
           return;
-#ifdef ZEPHYR_ARCH
-        }
-        else if (!stepIsPulseDataExhausted())
-        {
-          continue;
-#endif // ZEPHYR_ARCH
+
         }
         else
         {
