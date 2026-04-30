@@ -33,6 +33,11 @@ static const struct gpio_dt_spec x_dir = GPIO_DT_SPEC_GET(DT_ALIAS(x_dir), gpios
 static const struct gpio_dt_spec y_dir = GPIO_DT_SPEC_GET(DT_ALIAS(y_dir), gpios);
 static const struct gpio_dt_spec z_dir = GPIO_DT_SPEC_GET(DT_ALIAS(z_dir), gpios);
 static const struct gpio_dt_spec step_disable = GPIO_DT_SPEC_GET(DT_ALIAS(step_disable), gpios);
+
+static GPIO_TypeDef *x_dir_port = GPIOA;
+static GPIO_TypeDef *y_dir_port = GPIOB;
+static GPIO_TypeDef *z_dir_port = GPIOA;
+
 static struct k_work_delayable stepper_disable_work; // Delayed work item for disabling stepper drivers after idle lock time
 static bool stepper_disable_scheduled = false; // Flag to track if the stepper disable work is already scheduled
 #endif
@@ -491,16 +496,16 @@ void stepper_driver_interrupt_handler(void)
   // Set the direction pins before we step the steppers, only if they have changed.
   if (st.dir_outbits != st.last_dir_outbits) {
     // X-Axis Direction
-    if (st.dir_outbits & (1 << X_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(x_dir.port, x_dir.pin); }
-    else { LL_GPIO_ResetOutputPin(x_dir.port, x_dir.pin); }
+    if (st.dir_outbits & (1 << X_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(x_dir_port, x_dir.pin); }
+    else { LL_GPIO_ResetOutputPin(x_dir_port, x_dir.pin); }
 
     // Y-Axis Direction
-    if (st.dir_outbits & (1 << Y_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(y_dir.port, y_dir.pin); }
-    else { LL_GPIO_ResetOutputPin(y_dir.port, y_dir.pin); }
+    if (st.dir_outbits & (1 << Y_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(y_dir_port, y_dir.pin); }
+    else { LL_GPIO_ResetOutputPin(y_dir_port, y_dir.pin); }
 
     // Z-Axis Direction
-    if (st.dir_outbits & (1 << Z_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(z_dir.port, z_dir.pin); }
-    else { LL_GPIO_ResetOutputPin(z_dir.port, z_dir.pin); }
+    if (st.dir_outbits & (1 << Z_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(z_dir_port, z_dir.pin); }
+    else { LL_GPIO_ResetOutputPin(z_dir_port, z_dir.pin); }
     st.last_dir_outbits = st.dir_outbits;
   }
   stepper_controller_set_steps(stepper_dev, st.step_outbits); // Set the step pins
@@ -858,11 +863,6 @@ void st_reset()
   STEP_PORT = (STEP_PORT & ~STEP_MASK) | step_port_invert_mask;
   DIRECTION_PORT = (DIRECTION_PORT & ~DIRECTION_MASK) | dir_port_invert_mask;
 #endif
-
-#ifndef ZEPHYR_ARCH
-  // Initialize variables for the step agent
-  stepInit();
-#endif // AVR_ARCH
 
 #ifdef ENABLE_DUAL_AXIS
   st.dir_outbits_dual = dir_port_invert_mask_dual;

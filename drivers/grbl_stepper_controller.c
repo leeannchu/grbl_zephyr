@@ -47,6 +47,7 @@ static void stepper_timer_isr(void *arg);
 
 int stepper_controller_set_period(const struct device *dev, uint32_t cycles);
 void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask);
+void stepper_controller_clear_steps(const struct device *dev, uint16_t step_mask);
 void stepper_controller_reset_steps(const struct device *dev);
 void stepper_controller_enable_interrupt(const struct device *dev);
 void stepper_controller_disable_interrupt(const struct device *dev);
@@ -61,6 +62,8 @@ struct stepper_controller_data
     uint32_t flags;
     uint32_t step_pulse_width_cycles;
     uint32_t last_cc1_fired;  // Timestamp of last CC1 interrupt (when CCR1 matched CNT)
+    GPIO_TypeDef *step_ports[3];
+    uint32_t step_pin_masks[3];
 };
 
 /* configuration */
@@ -155,6 +158,17 @@ static int stepper_controller_init(const struct device *dev)
     irq_enable(STEPPER_TIMER_IRQN);
     LL_TIM_EnableCounter(cfg->timer_instance); // Start Timer
 
+    // Cache LL GPIO port/mask values in writable driver data.
+    // From overlay: x-pulse-gpios = <&gpiob 10>, y-pulse-gpios = <&gpioa 3>, z-pulse-gpios = <&gpioa 0>
+    data->step_ports[0] = GPIOB;
+    data->step_pin_masks[0] = LL_GPIO_PIN_10;
+
+    data->step_ports[1] = GPIOA;
+    data->step_pin_masks[1] = LL_GPIO_PIN_3;
+
+    data->step_ports[2] = GPIOA;
+    data->step_pin_masks[2] = LL_GPIO_PIN_0;
+
     return 0;
 }
 
@@ -240,19 +254,20 @@ void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
 
     k_spinlock_key_t key = k_spin_lock(&data->lock); // Lock to prevent concurrent access to timer and GPIOs
 
+    // Use LL_GPIO for performance
     if (step_mask & (1U << X_STEP_BIT))   // X
     {
-        gpio_pin_set_dt(&cfg->step_gpios[0], 1);
+        LL_GPIO_SetOutputPin(data->step_ports[0], data->step_pin_masks[0]);
     }
 
     if (step_mask & (1U << Y_STEP_BIT))   // Y
     {
-        gpio_pin_set_dt(&cfg->step_gpios[1], 1);
+        LL_GPIO_SetOutputPin(data->step_ports[1], data->step_pin_masks[1]);
     }
 
     if (step_mask & (1U << Z_STEP_BIT))   // Z
     {
-        gpio_pin_set_dt(&cfg->step_gpios[2], 1);
+        LL_GPIO_SetOutputPin(data->step_ports[2], data->step_pin_masks[2]);
     }
 
     // Schedule the reset of the step pins after the pulse width duration
@@ -283,6 +298,36 @@ void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
         LL_TIM_EnableIT_CC2(cfg->timer_instance);
     }
     
+    k_spin_unlock(&data->lock, key);
+}
+
+void stepper_controller_clear_steps(const struct device *dev, uint16_t step_mask)
+{
+    if (step_mask == 0)
+    {
+        return;
+    }
+
+    const struct stepper_controller_config *cfg = dev->config;
+    struct stepper_controller_data *data = dev->data;
+
+    k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+    if (step_mask & (1U << X_STEP_BIT))   // X
+    {
+        gpio_pin_set_dt(&cfg->step_gpios[0], 0);
+    }
+
+    if (step_mask & (1U << Y_STEP_BIT))   // Y
+    {
+        gpio_pin_set_dt(&cfg->step_gpios[1], 0);
+    }
+
+    if (step_mask & (1U << Z_STEP_BIT))   // Z
+    {
+        gpio_pin_set_dt(&cfg->step_gpios[2], 0);
+    }
+
     k_spin_unlock(&data->lock, key);
 }
 

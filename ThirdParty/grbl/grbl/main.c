@@ -49,7 +49,7 @@ void mainGRBL(void)
     // flashInit(); //在 stm32f7xx_flash_ex.c裡但已經被刪掉
   #endif // ZEPHYR_ARCH*/
 
-  io_init();
+  //io_init();
   serial_init();   // Setup serial baud rate and interrupts
   settings_init(); // Load Grbl settings from EEPROM
   stepper_init();  // Configure stepper pins and interrupt timers

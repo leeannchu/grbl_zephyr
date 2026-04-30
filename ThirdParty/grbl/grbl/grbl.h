@@ -108,13 +108,8 @@ static inline void encoderReadInstantPosition(encoder_degree_t *deg)
 }
 static inline void encoderResetCounter(uint8_t axis) {} // 空函式
 #define NUM_DIMENSIONS 3
-/*
-
-// 2. Mock WWDG (看門狗)
-static inline void startWWDG(void) {}*/
 void flashMemcpyToEepromWithChecksum(uint32_t dest, char *source, uint32_t size);
 void flashWriteVersion(uint8_t ver);
-// 如果 startWWDG 也還在報錯，也加在這裡：
 void startWWDG(void);
 
 #endif

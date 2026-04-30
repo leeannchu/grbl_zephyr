@@ -432,12 +432,6 @@ uint8_t mc_probe_cycle(float *target, plan_line_data_t *pl_data, uint8_t parser_
   probe_configure_invert_mask(false); // Re-initialize invert mask.
   protocol_execute_realtime();        // Check and execute run-time commands
 
-#ifdef ZEPHYR_ARCH
-  while (!stepIsPulseDataExhausted())
-  {
-    // wait for DMA to finish
-  }
-#endif
   // Reset the stepper and planner buffers to remove the remainder of the probe motion.
   st_reset();           // Reset step segment buffer.
   plan_reset();         // Reset planner buffer. Zero planner positions. Ensure probing motion is cleared.

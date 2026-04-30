@@ -21,17 +21,23 @@
 
 #include "grbl.h"
 
-#if 0
+#if defined(ZEPHYR_ARCH)
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+
+static const struct gpio_dt_spec spindle_enable = GPIO_DT_SPEC_GET(DT_ALIAS(spindle_enable), gpios);
+#ifndef ENABLE_DUAL_AXIS
+static const struct gpio_dt_spec spindle_dir = GPIO_DT_SPEC_GET(DT_ALIAS(spindle_dir), gpios);
+#endif
+#endif
+
 #ifdef VARIABLE_SPINDLE
 static float pwm_gradient; // Precalulated value to speed up rpm to PWM conversions.
 #endif
 
 void spindle_init()
 {
-#ifdef ZEPHYR_ARCH // 先讓這邊便空殼
-  return;
-#else
-
+#if defined(AVR_ARCH)
 #ifdef VARIABLE_SPINDLE
   // Configure variable spindle PWM and enable pin, if requried. On the Uno, PWM and enable are
   // combined unless configured otherwise.
@@ -47,20 +53,34 @@ void spindle_init()
 #endif
   pwm_gradient = SPINDLE_PWM_RANGE / (settings.rpm_max - settings.rpm_min);
 #else
-#ifdef AVR_ARCH
   SPINDLE_ENABLE_DDR |= (1 << SPINDLE_ENABLE_BIT); // Configure as output pin.
 #ifndef ENABLE_DUAL_AXIS
   SPINDLE_DIRECTION_DDR |= (1 << SPINDLE_DIRECTION_BIT); // Configure as output pin.
 #endif
-#endif // AVR_ARCH
+#endif
+  spindle_stop();
+#elif defined(ZEPHYR_ARCH)
+  if (gpio_is_ready_dt(&spindle_enable))
+  {
+    gpio_pin_configure_dt(&spindle_enable, GPIO_OUTPUT_INACTIVE);
+  }
+#ifndef ENABLE_DUAL_AXIS
+  if (gpio_is_ready_dt(&spindle_dir))
+  {
+    gpio_pin_configure_dt(&spindle_dir, GPIO_OUTPUT_INACTIVE);
+  }
 #endif
 
+#ifdef VARIABLE_SPINDLE
+  pwm_gradient = SPINDLE_PWM_RANGE / (settings.rpm_max - settings.rpm_min);
+#endif
   spindle_stop();
 #endif
 }
 
 uint8_t spindle_get_state()
 {
+#if defined(AVR_ARCH)
 #ifdef VARIABLE_SPINDLE
 #ifdef USE_SPINDLE_DIR_AS_ENABLE_PIN
 // No spindle direction output pin.
@@ -115,6 +135,27 @@ uint8_t spindle_get_state()
   }
 #endif
   return (SPINDLE_STATE_DISABLE);
+#elif defined(ZEPHYR_ARCH)
+  if (!gpio_is_ready_dt(&spindle_enable))
+  {
+    return (SPINDLE_STATE_DISABLE);
+  }
+
+  if (gpio_pin_get_dt(&spindle_enable) <= 0)
+  {
+    return (SPINDLE_STATE_DISABLE);
+  }
+
+#ifndef ENABLE_DUAL_AXIS
+  if (gpio_is_ready_dt(&spindle_dir) && (gpio_pin_get_dt(&spindle_dir) > 0))
+  {
+    return (SPINDLE_STATE_CCW);
+  }
+#endif
+  return (SPINDLE_STATE_CW);
+#else
+  return (SPINDLE_STATE_DISABLE);
+#endif
 }
 
 // Disables the spindle and sets PWM output to zero when PWM variable spindle speed is enabled.
@@ -122,6 +163,7 @@ uint8_t spindle_get_state()
 // Called by spindle_init(), spindle_set_speed(), spindle_set_state(), and mc_reset().
 void spindle_stop()
 {
+#if defined(AVR_ARCH)
 #ifdef VARIABLE_SPINDLE
   SPINDLE_TCCRA_REGISTER &= ~(1 << SPINDLE_COMB_BIT); // Disable PWM. Output voltage is zero.
 #ifdef USE_SPINDLE_DIR_AS_ENABLE_PIN
@@ -138,13 +180,21 @@ void spindle_stop()
   SPINDLE_ENABLE_PORT &= ~(1 << SPINDLE_ENABLE_BIT); // Set pin to low
 #endif
 #endif
+#elif defined(ZEPHYR_ARCH)
+  if (gpio_is_ready_dt(&spindle_enable))
+  {
+    gpio_pin_set_dt(&spindle_enable, 0);
+  }
+#endif
 }
 
 #ifdef VARIABLE_SPINDLE
 // Sets spindle speed PWM output and enable pin, if configured. Called by spindle_set_state()
 // and stepper ISR. Keep routine small and efficient.
+// NOTE: Didn't write this in Zephyr because this version comment out VARIABLE_SPINDLE in config.h for now, but it can be added back in if needed.
 void spindle_set_speed(uint8_t pwm_value)
 {
+#if defined(AVR_ARCH)
   SPINDLE_OCR_REGISTER = pwm_value; // Set PWM output level.
 #ifdef SPINDLE_ENABLE_OFF_WITH_ZERO_SPEED
   if (pwm_value == SPINDLE_PWM_OFF_VALUE)
@@ -169,6 +219,7 @@ void spindle_set_speed(uint8_t pwm_value)
   {
     SPINDLE_TCCRA_REGISTER |= (1 << SPINDLE_COMB_BIT); // Ensure PWM output is enabled.
   }
+#endif
 #endif
 }
 
@@ -295,6 +346,7 @@ void _spindle_set_state(uint8_t state)
   {
 
 #if !defined(USE_SPINDLE_DIR_AS_ENABLE_PIN) && !defined(ENABLE_DUAL_AXIS)
+#if defined(AVR_ARCH)
     if (state == SPINDLE_ENABLE_CW)
     {
       SPINDLE_DIRECTION_PORT &= ~(1 << SPINDLE_DIRECTION_BIT);
@@ -303,6 +355,12 @@ void _spindle_set_state(uint8_t state)
     {
       SPINDLE_DIRECTION_PORT |= (1 << SPINDLE_DIRECTION_BIT);
     }
+#elif defined(ZEPHYR_ARCH)
+    if (gpio_is_ready_dt(&spindle_dir))
+    {
+      gpio_pin_set_dt(&spindle_dir, (state == SPINDLE_ENABLE_CCW) ? 1 : 0);
+    }
+#endif
 #endif
 
 #ifdef VARIABLE_SPINDLE
@@ -321,10 +379,18 @@ void _spindle_set_state(uint8_t state)
     !defined(VARIABLE_SPINDLE)
 // NOTE: Without variable spindle, the enable bit should just turn on or off, regardless
 // if the spindle speed value is zero, as its ignored anyhow.
+#if defined(ZEPHYR_ARCH)
+    if (gpio_is_ready_dt(&spindle_enable))
+    {
+      gpio_pin_set_dt(&spindle_enable, 1);
+    }
+#elif defined(AVR_ARCH)
 #ifdef INVERT_SPINDLE_ENABLE_PIN
     SPINDLE_ENABLE_PORT &= ~(1 << SPINDLE_ENABLE_BIT);
 #else
+
     SPINDLE_ENABLE_PORT |= (1 << SPINDLE_ENABLE_BIT);
+#endif
 #endif
 #endif
   }
@@ -354,23 +420,4 @@ void _spindle_sync(uint8_t state)
   protocol_buffer_synchronize(); // Empty planner buffer to ensure spindle is set when programmed.
   _spindle_set_state(state);
 }
-#endif
-#endif
-
-#ifdef ZEPHYR_ARCH
-
-void spindle_init() {}
-
-void spindle_stop() {}
-
-uint8_t spindle_get_state() { return 0; }
-
-// 連結器可能會找這兩個名字的其中一個，為了保險，我們兩個都放
-void spindle_set_state(uint8_t state, float rpm) {}
-void spindle_sync(uint8_t state, float rpm) {}
-
-// 這個是 Variable Spindle 才會用到的，補上也無妨
-uint8_t spindle_compute_pwm_value(float rpm) { return 0; }
-void spindle_set_speed(uint8_t pwm_value) {}
-
 #endif

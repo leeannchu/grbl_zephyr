@@ -20,7 +20,36 @@
 
 #include "grbl.h"
 
-#if 0 // 這裡之後可以看看能不能把註解拿掉
+#if defined(ZEPHYR_ARCH)
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/reboot.h>
+
+static const struct gpio_dt_spec ctrl_reset = GPIO_DT_SPEC_GET(DT_ALIAS(ctrl_reset), gpios);
+static const struct gpio_dt_spec ctrl_feed_hold = GPIO_DT_SPEC_GET(DT_ALIAS(ctrl_feed_hold), gpios);
+static const struct gpio_dt_spec ctrl_cycle_start = GPIO_DT_SPEC_GET(DT_ALIAS(ctrl_cycle_start), gpios);
+static struct gpio_callback reset_cb_data;
+static struct gpio_callback feed_hold_cb_data;
+static struct gpio_callback cycle_start_cb_data;
+#endif
+
+// GPIO callback wrapper for Zephyr
+#if defined(ZEPHYR_ARCH)
+static void system_control_callback(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+  // Map the triggered pin to system handler
+  if (pins & BIT(ctrl_reset.pin)) {
+    system_control_pin_isr(ctrl_reset.pin);
+  }
+  if (pins & BIT(ctrl_feed_hold.pin)) {
+    system_control_pin_isr(ctrl_feed_hold.pin);
+  }
+  if (pins & BIT(ctrl_cycle_start.pin)) {
+    system_control_pin_isr(ctrl_cycle_start.pin);
+  }
+}
+#endif
+
 void system_init()
 {
 #if defined(AVR_ARCH)
@@ -33,27 +62,40 @@ void system_init()
   CONTROL_PCMSK |= CONTROL_MASK; // Enable specific pins of the Pin Change Interrupt
   PCICR |= (1 << CONTROL_INT);   // Enable Pin Change Interrupt
 #elif defined(ZEPHYR_ARCH)
-  // Configure control pins as input pins
-  GPIO_InitTypeDef GPIO_InitStruct;
-  GPIO_InitStruct.Pin = CONTROL_MASK;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-#ifdef DISABLE_CONTROL_PIN_PULL_UP
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-#else
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-#endif // DISABLE_CONTROL_PIN_PULL_UP
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(CONTROL_GPIO_GROUP, &GPIO_InitStruct);
+  if (!gpio_is_ready_dt(&ctrl_reset) || !gpio_is_ready_dt(&ctrl_feed_hold) || 
+      !gpio_is_ready_dt(&ctrl_cycle_start)) {
+    return; // GPIO device not ready
+  }
+  
+  // Configure control pins as input with edge detection
+  gpio_pin_configure_dt(&ctrl_reset, GPIO_INPUT);
+  gpio_pin_configure_dt(&ctrl_feed_hold, GPIO_INPUT);
+  gpio_pin_configure_dt(&ctrl_cycle_start, GPIO_INPUT);
+  
+  // Configure edge interrupts (both rising and falling)
+  gpio_pin_interrupt_configure_dt(&ctrl_reset, GPIO_INT_EDGE_BOTH);
+  gpio_pin_interrupt_configure_dt(&ctrl_feed_hold, GPIO_INT_EDGE_BOTH);
+  gpio_pin_interrupt_configure_dt(&ctrl_cycle_start, GPIO_INT_EDGE_BOTH);
+  
+  // Initialize and add GPIO callback
+  gpio_init_callback(&reset_cb_data, system_control_callback, 
+                     BIT(ctrl_reset.pin));
+  gpio_init_callback(&feed_hold_cb_data, system_control_callback, 
+                     BIT(ctrl_feed_hold.pin));
+  gpio_init_callback(&cycle_start_cb_data, system_control_callback, 
+                     BIT(ctrl_cycle_start.pin));
+  gpio_add_callback(ctrl_reset.port, &reset_cb_data);
+  gpio_add_callback(ctrl_feed_hold.port, &feed_hold_cb_data);
+  gpio_add_callback(ctrl_cycle_start.port, &cycle_start_cb_data);
 #endif // AVR_ARCH
 }
-#endif
 
-#if 0 // 跟外部按鈕有關 先註解掉
 // Returns control pin state as a uint8 bitfield. Each bit indicates the input pin state, where
 // triggered is 1 and not triggered is 0. Invert mask is applied. Bitfield organization is
 // defined by the CONTROL_PIN_INDEX in the header file.
 uint8_t system_control_get_state()
 {
+#if defined(AVR_ARCH)
   uint8_t control_state = 0;
   IO_TYPE pin = (CONTROL_PIN & CONTROL_MASK) ^ CONTROL_MASK;
 #ifdef INVERT_CONTROL_PIN_MASK
@@ -82,31 +124,57 @@ uint8_t system_control_get_state()
     }
   }
   return (control_state);
-}
+#elif defined(ZEPHYR_ARCH)
+  uint8_t control_state = 0;
+  
+  // Read current state of control pins
+  int reset_state = gpio_pin_get_dt(&ctrl_reset);
+  int feed_hold_state = gpio_pin_get_dt(&ctrl_feed_hold);
+  int cycle_start_state = gpio_pin_get_dt(&ctrl_cycle_start);
+  
+  // Map GPIO states to control state bits
+  if (reset_state > 0) {
+    control_state |= CONTROL_PIN_INDEX_RESET;
+  }
+#ifdef ENABLE_SAFETY_DOOR_INPUT_PIN
+  if (feed_hold_state > 0) {
+    control_state |= CONTROL_PIN_INDEX_SAFETY_DOOR;
+  }
+#else
+  if (feed_hold_state > 0) {
+    control_state |= CONTROL_PIN_INDEX_FEED_HOLD;
+  }
 #endif
+  if (cycle_start_state > 0) {
+    control_state |= CONTROL_PIN_INDEX_CYCLE_START;
+  }
+  
+  return control_state;
+#endif
+}
 
-#if 0 // 跟外部按鈕有關 先註解掉
 // Pin change interrupt for pin-out commands, i.e. cycle start, feed hold, and reset. Sets
 // only the realtime command execute variable to have the main program execute these when
 // its ready. This works exactly like the character-based realtime commands when picked off
 // directly from the incoming serial data stream.
 #if defined(AVR_ARCH)
 ISR(CONTROL_INT_vect)
-#elif defined(ZEPHYR_ARCH)
-void system_control_pin_isr(uint16_t GPIO_Pin)
 #endif
+void system_control_pin_isr(uint16_t GPIO_Pin)
 {
+#if defined(AVR_ARCH)
   uint8_t pin = system_control_get_state();
+#elif defined(ZEPHYR_ARCH)
+  uint8_t pin = system_control_get_state();
+#endif
+  
   if (pin)
   {
-    // For the ZEPHYR_ARCH, the RESET pin is connected to the EMG stop button
     if (bit_istrue(pin, CONTROL_PIN_INDEX_RESET))
     {
       mc_reset();
 #ifdef ZEPHYR_ARCH
       system_set_exec_alarm(EXEC_ALARM_EMG_STOP); // Indicate hard limit critical event
-
-      // start WWDG
       startWWDG();
 #endif
     }
@@ -158,7 +226,6 @@ void system_execute_startup(char *line)
     }
   }
 }
-#endif
 
 // Directs and executes one line of formatted input from protocol_process. While mostly
 // incoming streaming g-code blocks, this also executes Grbl internal commands, such as
@@ -440,8 +507,6 @@ uint8_t system_execute_line(char *line)
   }
   return (STATUS_OK); // If '$' command makes it to here, then everything's ok.
 }
-
-#if 0
 void system_flag_wco_change()
 {
 #ifdef FORCE_BUFFER_SYNC_DURING_WCO_CHANGE
@@ -530,7 +595,7 @@ uint8_t system_check_travel_limits(float *target)
   }
   return (false);
 }
-#endif
+
 
 // Special handlers for setting and clearing Grbl's real-time execution flags.
 void system_set_exec_state_flag(uint8_t mask)
@@ -660,34 +725,9 @@ void system_clear_exec_user_defined_flag(uint8_t mask)
   sys_rt_exec_user_defined &= ~(mask);
   irq_unlock(key);
 }
-#endif
 
-#ifdef ZEPHYR_ARCH
-// --- Zephyr 空殼 ---
-void system_init() {}
-
-// --- 狀態控制 ---
-uint8_t system_control_get_state() { return 0; }
-
-// --- 座標與位置 ---
-void system_convert_array_steps_to_mpos(float *position, int32_t *steps)
+void startWWDG(void)
 {
-  // 假裝位置是 0
-  int idx;
-  for (idx = 0; idx < N_AXIS; idx++)
-  {
-    position[idx] = 0.0f;
-  }
+  sys_reboot(SYS_REBOOT_COLD);
 }
-
-uint8_t system_check_travel_limits(float *target) { return 0; }
-
-// --- 安全門與其他 ---
-uint8_t system_check_safety_door_ajar() { return 0; }
-void system_flag_wco_change() {}
-
-// --- 啟動與執行 ---
-void system_execute_startup(char *line) {}
-
-void startWWDG(void) {}
 #endif

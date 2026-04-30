@@ -38,15 +38,6 @@ target_sources(app PRIVATE
     ${GRBL_DIR}/system.c     
 )
 
-target_compile_options(app PRIVATE
-    -Wno-unused-result
-    -Wno-pointer-sign
-    -Wno-double-promotion
-    -Wno-error=double-promotion
-    -Wno-implicit-int
-    -Wno-implicit-function-declaration
-)
-
 target_compile_definitions(app PRIVATE
     ZEPHYR_ARCH=1
 )

@@ -239,7 +239,7 @@ void protocol_buffer_synchronize()
   } while (plan_get_current_block() || (sys.state == STATE_CYCLE));
 #elif defined(ZEPHYR_ARCH)
     protocol_auto_cycle_start();
-  } while (plan_get_current_block() || !stepIsPulseDataExhausted() || (sys.state == STATE_CYCLE) || (sys_rt_exec_user_defined & EXEC_DWELL));
+  } while (plan_get_current_block() || (sys.state == STATE_CYCLE) || (sys_rt_exec_user_defined & EXEC_DWELL));
 #endif
 }
 
