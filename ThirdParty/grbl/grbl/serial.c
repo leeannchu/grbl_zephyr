@@ -38,11 +38,49 @@ volatile uint8_t serial_tx_buffer_tail = 0;
 #include <zephyr/drivers/uart.h>
 #include <zephyr/device.h>
 #include <string.h>
+#include <limits.h>
+
+#ifndef UINT_MAX
+#define UINT_MAX 4294967295U
+#endif
 
 #define UART_DEVICE_NODE DT_NODELABEL(usart3)
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
 void serial_glue_callback(const struct device *dev, void *user_data); // Forward declaration for the glue callback function.
+
+static uint8_t serial_net_tx_buffer[TX_RING_BUFFER];
+static volatile uint8_t serial_net_tx_head = 0;
+static volatile uint8_t serial_net_tx_tail = 0;
+K_SEM_DEFINE(serial_net_tx_sem, 0, 1);
+
+void serial_tx_notify(void)
+{
+  k_sem_give(&serial_net_tx_sem);
+}
+
+void serial_net_tx_wait(void)
+{
+  k_sem_take(&serial_net_tx_sem, K_FOREVER);
+}
+
+int serial_net_tx_pop(uint8_t *data)
+{
+  uint8_t tail = serial_net_tx_tail;
+  if (serial_net_tx_head == tail)
+  {
+    return 0;
+  }
+
+  *data = serial_net_tx_buffer[tail];
+  tail++;
+  if (tail == TX_RING_BUFFER)
+  {
+    tail = 0;
+  }
+  serial_net_tx_tail = tail;
+  return 1;
+}
 
 #endif
 
@@ -150,7 +188,20 @@ void serial_write(uint8_t data)
   // Enable Data Register Empty Interrupt to make sure tx-streaming is running
   UCSR0B |= (1 << UDRIE0);
 #elif defined(ZEPHYR_ARCH)
-  uart_irq_tx_enable(uart_dev); // UART發送啟動
+  uart_irq_tx_enable(uart_dev); // Start sending data from the buffer
+
+  // Mirror the data to the network TX buffer for the TCP TX thread to send back to the client.
+  uint8_t next_net_head = serial_net_tx_head + 1;
+  if (next_net_head == TX_RING_BUFFER)
+  {
+    next_net_head = 0;
+  }
+  if (next_net_head != serial_net_tx_tail)
+  {
+    serial_net_tx_buffer[serial_net_tx_head] = data;
+    serial_net_tx_head = next_net_head;
+    serial_tx_notify();
+  }
 #endif // AVR_ARCH
 }
 

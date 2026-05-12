@@ -8,7 +8,7 @@ Original project reference:
 
 ## Environment
 - Zephyr OS: v4.4 (v3.7 showed performance limitations)
-- Zephyr SDK: v1.1
+- Zephyr SDK: v1.0.1
 
 ## Build
 Build the project with:
