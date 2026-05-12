@@ -15,6 +15,8 @@ target_include_directories(app PRIVATE
 target_sources(app PRIVATE
     ${CORE_DIR}/Src/main.c
     ${CORE_DIR}/Src/step.c
+    ${CORE_DIR}/Src/tcp_rx.c
+    ${CORE_DIR}/Src/tcp_tx.c
     drivers/grbl_stepper_controller.c
 
     ${GRBL_DIR}/coolant_control.c
