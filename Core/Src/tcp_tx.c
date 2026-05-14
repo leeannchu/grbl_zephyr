@@ -12,6 +12,7 @@
 #include "tcp_tx.h"
 
 static volatile int tx_running = 0;
+static int tx_send_counter = 0;
 
 void tcp_tx_begin(void)
 {
@@ -40,6 +41,8 @@ void tcp_tx_thread_entry(void *p1, void *p2, void *p3)
 				break;
 			}
 			serial_net_tx_wait();
+			// Yield to allow GRBL to run while waiting for data
+			//k_yield();
 			continue;
 		}
 
@@ -50,6 +53,11 @@ void tcp_tx_thread_entry(void *p1, void *p2, void *p3)
 				break;
 			}
 			used = 0;
+			/* Count full/line sends and yield occasionally so GRBL can update timing. */
+			tx_send_counter++;
+			if ((tx_send_counter & 15) == 0) {
+				k_yield();
+			}
 		}
 	}
 

@@ -23,6 +23,7 @@
 
 #define RX_RING_BUFFER (RX_BUFFER_SIZE + 1)
 #define TX_RING_BUFFER (TX_BUFFER_SIZE + 1)
+#define NET_TX_BUFFER_SIZE 1024
 
 uint8_t serial_rx_buffer[RX_RING_BUFFER];
 volatile uint8_t serial_rx_buffer_head = 0;
@@ -39,6 +40,7 @@ volatile uint8_t serial_tx_buffer_tail = 0;
 #include <zephyr/device.h>
 #include <string.h>
 #include <limits.h>
+#include "serial.h"
 
 #ifndef UINT_MAX
 #define UINT_MAX 4294967295U
@@ -49,9 +51,9 @@ static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
 void serial_glue_callback(const struct device *dev, void *user_data); // Forward declaration for the glue callback function.
 
-static uint8_t serial_net_tx_buffer[TX_RING_BUFFER];
-static volatile uint8_t serial_net_tx_head = 0;
-static volatile uint8_t serial_net_tx_tail = 0;
+static uint8_t serial_net_tx_buffer[NET_TX_BUFFER_SIZE];
+static volatile uint16_t serial_net_tx_head = 0;
+static volatile uint16_t serial_net_tx_tail = 0;
 K_SEM_DEFINE(serial_net_tx_sem, 0, 1);
 
 void serial_tx_notify(void)
@@ -64,9 +66,9 @@ void serial_net_tx_wait(void)
   k_sem_take(&serial_net_tx_sem, K_FOREVER);
 }
 
-int serial_net_tx_pop(uint8_t *data)
+int serial_net_tx_pop(unsigned char *data)
 {
-  uint8_t tail = serial_net_tx_tail;
+  uint16_t tail = serial_net_tx_tail;
   if (serial_net_tx_head == tail)
   {
     return 0;
@@ -74,7 +76,7 @@ int serial_net_tx_pop(uint8_t *data)
 
   *data = serial_net_tx_buffer[tail];
   tail++;
-  if (tail == TX_RING_BUFFER)
+  if (tail == NET_TX_BUFFER_SIZE)
   {
     tail = 0;
   }
@@ -191,8 +193,8 @@ void serial_write(uint8_t data)
   uart_irq_tx_enable(uart_dev); // Start sending data from the buffer
 
   // Mirror the data to the network TX buffer for the TCP TX thread to send back to the client.
-  uint8_t next_net_head = serial_net_tx_head + 1;
-  if (next_net_head == TX_RING_BUFFER)
+  uint16_t next_net_head = serial_net_tx_head + 1;
+  if (next_net_head == NET_TX_BUFFER_SIZE)
   {
     next_net_head = 0;
   }
