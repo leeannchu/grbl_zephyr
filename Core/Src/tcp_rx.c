@@ -33,6 +33,7 @@
 #include "tcp_tx.h"
 
 #define BIND_PORT 8500
+static int rx_yield_counter = 0;
 
 static void feed_grbl_rx(const char *data, int length)
 {
@@ -60,6 +61,12 @@ void tcp_rx_session(void *p1, void *p2, void *p3)
 		}
 
 		feed_grbl_rx(buf, len);
+		/* Yield back to GRBL periodically to allow pulse timing updates. */
+		rx_yield_counter++;
+		if (rx_yield_counter >= 32) {
+			rx_yield_counter = 0;
+			k_yield();
+		}
 	}
 }
 
@@ -109,6 +116,8 @@ int main_tcp(void)
 
 		tcp_session_run(client);
 		printf("Connection from %s closed\n", addr_str);
+		// Yield to allow GRBL to execute between client connections
+		//k_yield();
 	}
 	return 0;
 }

@@ -16,9 +16,11 @@
 #define GRBL_STACKSIZE 4096
 #define GRBL_PRIORITY 5
 #define TCP_STACKSIZE 4096
-#define TCP_PRIORITY 4
+#define TCP_PRIORITY 5
 #define TCP_RX_STACKSIZE 2048
 #define TCP_TX_STACKSIZE 2048
+#define TCP_RX_PRIORITY 5
+#define TCP_TX_PRIORITY 5
 
 K_SEM_DEFINE(grbl_ready_sem, 0, 1); // Binary semaphore to signal when GRBL thread can start
 
@@ -38,12 +40,12 @@ void tcp_session_run(int client)
     rx_tid = k_thread_create(&tcp_rx_thread_data, tcp_rx_thread_stack,
                              K_THREAD_STACK_SIZEOF(tcp_rx_thread_stack),
                              tcp_rx_session, (void *)(intptr_t)client,
-                             NULL, NULL, 4, 0, K_NO_WAIT);
+                             NULL, NULL, TCP_RX_PRIORITY, 0, K_NO_WAIT);
 
     tx_tid = k_thread_create(&tcp_tx_thread_data, tcp_tx_thread_stack,
                              K_THREAD_STACK_SIZEOF(tcp_tx_thread_stack),
                              tcp_tx_thread_entry, (void *)(intptr_t)client,
-                             NULL, NULL, 5, 0, K_NO_WAIT);
+                             NULL, NULL, TCP_TX_PRIORITY, 0, K_NO_WAIT);
 
     if (rx_tid) {
         k_thread_join(rx_tid, K_FOREVER);
