@@ -13,6 +13,7 @@ LOG_MODULE_REGISTER(grbl_stepper, CONFIG_GPIO_LOG_LEVEL);
 #define DT_DRV_COMPAT grbl_stepper_controller
 #define STEPPER_INST 0
 #define STEPPER_TIMER_IRQN DT_IRQN(DT_INST_PHANDLE(STEPPER_INST, timer))
+#define STEPPER_MIN_SCHEDULE_GUARD_CYCLES 128U
 
 #if DT_NUM_INST_STATUS_OKAY(DT_DRV_COMPAT) == 0
 #error "Stepper Driver is enabled without any devices"
@@ -44,6 +45,12 @@ LOG_MODULE_REGISTER(grbl_stepper, CONFIG_GPIO_LOG_LEVEL);
 /* private function prototype */
 static int stepper_controller_init(const struct device *dev);
 static void stepper_timer_isr(void *arg);
+
+/* Wrap-safe timer compare: true when now has reached/passed target in modulo-2^32 time. */
+static inline int tim_reached_or_passed(uint32_t now, uint32_t target)
+{
+    return (uint32_t)(now - target) < 0x80000000u;
+}
 
 int stepper_controller_set_period(const struct device *dev, uint32_t cycles);
 void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask);
@@ -149,7 +156,6 @@ static int stepper_controller_init(const struct device *dev)
     
     data->last_cc1_fired = 0; // Initialize CC1 fire timestamp
 
-    // Priority '0' means Highest Priority 
     IRQ_CONNECT(STEPPER_TIMER_IRQN, 0, stepper_timer_isr, DEVICE_DT_INST_GET(STEPPER_INST), 0); // Connect the timer interrupt to the ISR
     LL_TIM_DisableIT_CC1(cfg->timer_instance);
     LL_TIM_DisableIT_CC2(cfg->timer_instance);
@@ -224,19 +230,48 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
     const struct stepper_controller_config *cfg = dev->config;
     struct stepper_controller_data *data = dev->data;
     k_spinlock_key_t key = k_spin_lock(&data->lock);
+
+    if (cycles == 0U)
+    {
+        k_spin_unlock(&data->lock, key);
+        return -EINVAL;
+    }
     
     // Base the next compare point on the last CC1 fire time, not the current counter
-    // This eliminates ISR execution time from the period calculation
     uint32_t next_cc1 = data->last_cc1_fired + cycles;
     uint32_t current_cnt = LL_TIM_GetCounter(cfg->timer_instance);
     
-    // Safety check: if the next point is already in the past, reschedule from now
-    if ((int32_t)(current_cnt - next_cc1) >= 0)
+    // If next deadline is already in the past, catch up by whole periods and keep phase continuity.
+    if (tim_reached_or_passed(current_cnt, next_cc1))
     {
-        next_cc1 = current_cnt + cycles;
+        uint32_t lag = current_cnt - next_cc1;
+        uint32_t skip = (lag / cycles) + 1U;
+        next_cc1 += skip * cycles;
+    }
+
+    // Guard against preemption window between computing next_cc1 and programming CCR1.
+    // Keep phase continuity by advancing in whole periods until target is safely in the future.
+    {
+        uint32_t now_before_write = LL_TIM_GetCounter(cfg->timer_instance);
+        uint32_t guard_target = now_before_write + STEPPER_MIN_SCHEDULE_GUARD_CYCLES;
+        if (tim_reached_or_passed(guard_target, next_cc1))
+        {
+            uint32_t gap = guard_target - next_cc1;
+            uint32_t skip = (gap / cycles) + 1U;
+            next_cc1 += skip * cycles;
+        }
     }
     
     LL_TIM_OC_SetCompareCH1(cfg->timer_instance, next_cc1);
+
+    // Final safety net: if an ISR preempted us and we still missed the compare point, force the next period from "now" to avoid waiting until counter wrap.
+    {
+        uint32_t now_after_write = LL_TIM_GetCounter(cfg->timer_instance);
+        if (tim_reached_or_passed(now_after_write, next_cc1))
+        {
+            LL_TIM_OC_SetCompareCH1(cfg->timer_instance, now_after_write + cycles);
+        }
+    }
     
     k_spin_unlock(&data->lock, key);
     return 0;
@@ -283,7 +318,7 @@ void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
     
     // Check if we already passed the target time
     uint32_t check_cnt = LL_TIM_GetCounter(cfg->timer_instance);
-    if ((int32_t)(check_cnt - target_cnt) >= 0)
+    if (tim_reached_or_passed(check_cnt, target_cnt))
     {
         // Already passed the target time, reset GPIO immediately
         LOG_WRN("Pulse width setting too short for interrupt-based control, using direct reset. Missed by %u cycles", 
