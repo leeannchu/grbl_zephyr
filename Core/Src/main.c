@@ -68,7 +68,7 @@ static void tcp_thread_entry(void *p1, void *p2, void *p3)
     ARG_UNUSED(p2);
     ARG_UNUSED(p3);
 
-    int ret = main_tcp();
+    main_tcp();
 
 }
 

@@ -26,7 +26,6 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include "grbl_stepper_controller.h"
-#include <stm32f7xx_ll_gpio.h>
 
 static const struct device *stepper_dev = DEVICE_DT_GET(DT_NODELABEL(stepper_controller));
 static const struct gpio_dt_spec x_dir = GPIO_DT_SPEC_GET(DT_ALIAS(x_dir), gpios);
@@ -34,17 +33,13 @@ static const struct gpio_dt_spec y_dir = GPIO_DT_SPEC_GET(DT_ALIAS(y_dir), gpios
 static const struct gpio_dt_spec z_dir = GPIO_DT_SPEC_GET(DT_ALIAS(z_dir), gpios);
 static const struct gpio_dt_spec step_disable = GPIO_DT_SPEC_GET(DT_ALIAS(step_disable), gpios);
 
-static GPIO_TypeDef *x_dir_port = GPIOA;
-static GPIO_TypeDef *y_dir_port = GPIOB;
-static GPIO_TypeDef *z_dir_port = GPIOA;
-
 static struct k_work_delayable stepper_disable_work; // Delayed work item for disabling stepper drivers after idle lock time
 static bool stepper_disable_scheduled = false; // Flag to track if the stepper disable work is already scheduled
 #endif
 
 // Some useful constants.
-#define DT_SEGMENT (1.0 / (ACCELERATION_TICKS_PER_SECOND * 60.0)) // min/segment
-#define REQ_MM_INCREMENT_SCALAR 1.25
+#define DT_SEGMENT (1.0f / (ACCELERATION_TICKS_PER_SECOND * 60.0f)) // min/segment
+#define REQ_MM_INCREMENT_SCALAR 1.25f
 #define RAMP_ACCEL 0
 #define RAMP_CRUISE 1
 #define RAMP_DECEL 2
@@ -354,6 +349,7 @@ void st_go_idle()
   TCCR1B = (TCCR1B & ~((1 << CS12) | (1 << CS11))) | (1 << CS10); // Reset clock to no prescaling.
 #elif defined(ZEPHYR_ARCH)
   stepper_controller_disable_interrupt(stepper_dev);
+  st.step_outbits = 0;
   stepper_controller_reset_steps(stepper_dev);
 #endif // AVR_ARCH
 
@@ -495,7 +491,7 @@ void stepper_driver_interrupt_handler(void)
 #elif defined(ZEPHYR_ARCH)
   // Set the direction pins before we step the steppers, only if they have changed.
   if (st.dir_outbits != st.last_dir_outbits) {
-    // X-Axis Direction
+    /*// X-Axis Direction
     if (st.dir_outbits & (1 << X_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(x_dir_port, x_dir.pin); }
     else { LL_GPIO_ResetOutputPin(x_dir_port, x_dir.pin); }
 
@@ -505,7 +501,11 @@ void stepper_driver_interrupt_handler(void)
 
     // Z-Axis Direction
     if (st.dir_outbits & (1 << Z_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(z_dir_port, z_dir.pin); }
-    else { LL_GPIO_ResetOutputPin(z_dir_port, z_dir.pin); }
+    else { LL_GPIO_ResetOutputPin(z_dir_port, z_dir.pin); }*/
+    gpio_pin_set_dt(&x_dir, (st.dir_outbits & (1 << X_DIRECTION_BIT)) ? 1 : 0);
+    gpio_pin_set_dt(&y_dir, (st.dir_outbits & (1 << Y_DIRECTION_BIT)) ? 1 : 0);
+    gpio_pin_set_dt(&z_dir, (st.dir_outbits & (1 << Z_DIRECTION_BIT)) ? 1 : 0);
+    
     st.last_dir_outbits = st.dir_outbits;
   }
   stepper_controller_set_steps(stepper_dev, st.step_outbits); // Set the step pins
@@ -1127,8 +1127,8 @@ void st_prep_buffer()
        planner has updated it. For a commanded forced-deceleration, such as from a feed
        hold, override the planner velocities and decelerate to the target exit speed.
       */
-      prep.mm_complete = 0.0; // Default velocity profile complete at 0.0mm from end of block.
-      float inv_2_accel = 0.5 / pl_block->acceleration;
+      prep.mm_complete = 0.0f; // Default velocity profile complete at 0.0mm from end of block.
+      float inv_2_accel = 0.5f / pl_block->acceleration;
       if (sys.step_control & STEP_CONTROL_EXECUTE_HOLD)
       { // [Forced Deceleration to Zero Velocity]
         // Compute velocity profile parameters for a feed hold in-progress. This profile overrides
@@ -1136,15 +1136,15 @@ void st_prep_buffer()
         prep.ramp_type = RAMP_DECEL;
         // Compute decelerate distance relative to end of block.
         float decel_dist = pl_block->millimeters - inv_2_accel * pl_block->entry_speed_sqr;
-        if (decel_dist < 0.0)
+        if (decel_dist < 0.0f)
         {
           // Deceleration through entire planner block. End of feed hold is not in this block.
-          prep.exit_speed = sqrt(pl_block->entry_speed_sqr - 2 * pl_block->acceleration * pl_block->millimeters);
+          prep.exit_speed = sqrtf(pl_block->entry_speed_sqr - 2.0f * pl_block->acceleration * pl_block->millimeters);
         }
         else
         {
           prep.mm_complete = decel_dist; // End of feed hold.
-          prep.exit_speed = 0.0;
+          prep.exit_speed = 0.0f;
         }
       }
       else
@@ -1168,12 +1168,12 @@ void st_prep_buffer()
         nominal_speed = plan_compute_profile_nominal_speed(pl_block);
         float nominal_speed_sqr = nominal_speed * nominal_speed;
         float intersect_distance =
-            0.5 * (pl_block->millimeters + inv_2_accel * (pl_block->entry_speed_sqr - exit_speed_sqr));
+            0.5f * (pl_block->millimeters + inv_2_accel * (pl_block->entry_speed_sqr - exit_speed_sqr));
 
         if (pl_block->entry_speed_sqr > nominal_speed_sqr)
         { // Only occurs during override reductions.
           prep.accelerate_until = pl_block->millimeters - inv_2_accel * (pl_block->entry_speed_sqr - nominal_speed_sqr);
-          if (prep.accelerate_until <= 0.0)
+          if (prep.accelerate_until <= 0.0f)
           { // Deceleration-only.
             prep.ramp_type = RAMP_DECEL;
             // prep.decelerate_after = pl_block->millimeters;
@@ -1195,7 +1195,7 @@ void st_prep_buffer()
             prep.ramp_type = RAMP_DECEL_OVERRIDE;
           }
         }
-        else if (intersect_distance > 0.0)
+        else if (intersect_distance > 0.0f)
         {
           if (intersect_distance < pl_block->millimeters)
           { // Either trapezoid or triangle types
@@ -1219,7 +1219,7 @@ void st_prep_buffer()
             { // Triangle type
               prep.accelerate_until = intersect_distance;
               prep.decelerate_after = intersect_distance;
-              prep.maximum_speed = sqrt(2.0 * pl_block->acceleration * intersect_distance + exit_speed_sqr);
+              prep.maximum_speed = sqrt(2.0f * pl_block->acceleration * intersect_distance + exit_speed_sqr);
             }
           }
           else
@@ -1269,9 +1269,9 @@ void st_prep_buffer()
     float speed_var;                                         // Speed worker variable
     float mm_remaining = pl_block->millimeters;              // New segment distance from end of block.
     float minimum_mm = mm_remaining - prep.req_mm_increment; // Guarantee at least one step.
-    if (minimum_mm < 0.0)
+    if (minimum_mm < 0.0f)
     {
-      minimum_mm = 0.0;
+      minimum_mm = 0.0f;
     }
 
     do
@@ -1284,25 +1284,25 @@ void st_prep_buffer()
         {
           // Cruise or cruise-deceleration types only for deceleration override.
           mm_remaining = prep.accelerate_until;
-          time_var = 2.0 * (pl_block->millimeters - mm_remaining) / (prep.current_speed + prep.maximum_speed);
+          time_var = 2.0f * (pl_block->millimeters - mm_remaining) / (prep.current_speed + prep.maximum_speed);
           prep.ramp_type = RAMP_CRUISE;
           prep.current_speed = prep.maximum_speed;
         }
         else
         { // Mid-deceleration override ramp.
-          mm_remaining -= time_var * (prep.current_speed - 0.5 * speed_var);
+          mm_remaining -= time_var * (prep.current_speed - 0.5f * speed_var);
           prep.current_speed -= speed_var;
         }
         break;
       case RAMP_ACCEL:
         // NOTE: Acceleration ramp only computes during first do-while loop.
         speed_var = pl_block->acceleration * time_var;
-        mm_remaining -= time_var * (prep.current_speed + 0.5 * speed_var);
+        mm_remaining -= time_var * (prep.current_speed + 0.5f * speed_var);
         if (mm_remaining < prep.accelerate_until)
         { // End of acceleration ramp.
           // Acceleration-cruise, acceleration-deceleration ramp junction, or end of block.
           mm_remaining = prep.accelerate_until; // NOTE: 0.0 at EOB
-          time_var = 2.0 * (pl_block->millimeters - mm_remaining) / (prep.current_speed + prep.maximum_speed);
+          time_var = 2.0f * (pl_block->millimeters - mm_remaining) / (prep.current_speed + prep.maximum_speed);
           if (mm_remaining == prep.decelerate_after)
           {
             prep.ramp_type = RAMP_DECEL;
@@ -1341,7 +1341,7 @@ void st_prep_buffer()
         if (prep.current_speed > speed_var)
         { // Check if at or below zero speed.
           // Compute distance from end of segment to end of block.
-          mm_var = mm_remaining - time_var * (prep.current_speed - 0.5 * speed_var); // (mm)
+          mm_var = mm_remaining - time_var * (prep.current_speed - 0.5f * speed_var); // (mm)
           if (mm_var > prep.mm_complete)
           { // Typical case. In deceleration ramp.
             mm_remaining = mm_var;
@@ -1350,7 +1350,7 @@ void st_prep_buffer()
           }
         }
         // Otherwise, at end of block or end of forced-deceleration.
-        time_var = 2.0 * (mm_remaining - prep.mm_complete) / (prep.current_speed + prep.exit_speed);
+        time_var = 2.0f * (mm_remaining - prep.mm_complete) / (prep.current_speed + prep.exit_speed);
         mm_remaining = prep.mm_complete;
         prep.current_speed = prep.exit_speed;
       }
@@ -1543,7 +1543,7 @@ void st_prep_buffer()
     if (mm_remaining == prep.mm_complete)
     {
       // End of planner block or forced-termination. No more distance to be executed.
-      if (mm_remaining > 0.0)
+      if (mm_remaining > 0.0f)
       { // At end of forced-termination.
         // Reset prep parameters for resuming and then bail. Allow the stepper ISR to complete
         // the segment queue, where realtime protocol will set new state upon receiving the

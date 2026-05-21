@@ -42,14 +42,14 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/flash.h>
 #include <zephyr/device.h>
-#include <zephyr/fs/nvs.h>
+#include <zephyr/kvss/nvs.h>
 #include <string.h>
 #include <zephyr/storage/flash_map.h>
 
 // Define the flash partition for NVS from the device tree.
-#define NVS_PARTITION storage_partition
-#define NVS_PARTITION_DEVICE FIXED_PARTITION_DEVICE(NVS_PARTITION)
-#define NVS_PARTITION_OFFSET FIXED_PARTITION_OFFSET(NVS_PARTITION)
+#define STORAGE_PARTITION_NODE DT_NODELABEL(storage_partition)
+#define NVS_PARTITION_DEVICE DEVICE_DT_GET(DT_MTD_FROM_FIXED_PARTITION(STORAGE_PARTITION_NODE))
+#define NVS_PARTITION_OFFSET DT_REG_ADDR(STORAGE_PARTITION_NODE)
 
 #define EEPROM_SIZE 1024
 #define NVS_ID_1 1

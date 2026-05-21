@@ -67,8 +67,12 @@
 #define clear_vector(a) memset(a, 0, sizeof(a))
 #define clear_vector_float(a) memset(a, 0.0, sizeof(float) * N_AXIS)
 // #define clear_vector_long(a) memset(a, 0.0, sizeof(long)*N_AXIS)
+#ifndef max
 #define max(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+#ifndef min
 #define min(a, b) (((a) < (b)) ? (a) : (b))
+#endif
 #define isequal_position_vector(a, b) !(memcmp(a, b, sizeof(float) * N_AXIS))
 
 // Bit field and masking macros
