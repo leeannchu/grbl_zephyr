@@ -1,4 +1,3 @@
-
 / {
     aliases {
         x-dir = &x_dir_node;
@@ -24,7 +23,6 @@
         ctrl-feed-hold = &ctrl_feed_hold;
         ctrl-cycle-start = &ctrl_cycle_start;
         probe = &probe;
-
     };
 
     chosen {
@@ -170,10 +168,9 @@
 
         timer = <&timers2>;
 
-        x-pulse-gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>;
-        y-pulse-gpios = <&gpioa 3 GPIO_ACTIVE_HIGH>;
-        z-pulse-gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+        x-pulse-gpios = <&gpiob 10 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+        y-pulse-gpios = <&gpioa 3 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+        z-pulse-gpios = <&gpioa 0 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
 
     };
 };
-

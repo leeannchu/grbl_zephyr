@@ -71,6 +71,8 @@ struct stepper_controller_data
     uint32_t last_cc1_fired;  // Timestamp of last CC1 interrupt (when CCR1 matched CNT)
     GPIO_TypeDef *step_ports[3];
     uint32_t step_pin_masks[3];
+    uint32_t step_trigger_bsrr[3]; // Pre-computed BSRR value for pulse trigger (Active Low/High aware)
+    uint32_t step_release_bsrr[3]; // Pre-computed BSRR value for pulse release (Active Low/High aware)
 };
 
 /* configuration */
@@ -175,6 +177,18 @@ static int stepper_controller_init(const struct device *dev)
     data->step_ports[2] = GPIOA;
     data->step_pin_masks[2] = LL_GPIO_PIN_0;
 
+    // Pre-compute BSRR values for step trigger and release based on active low/high configuration
+     for (int i = 0; i < 3; i++) {
+            uint32_t pin_mask = data->step_pin_masks[i];
+            if (cfg->step_gpios[i].dt_flags & GPIO_ACTIVE_LOW) {
+                data->step_trigger_bsrr[i] = pin_mask << 16;
+                data->step_release_bsrr[i] = pin_mask;
+            } else {
+                data->step_trigger_bsrr[i] = pin_mask;
+                data->step_release_bsrr[i] = pin_mask << 16;
+            }
+            data->step_ports[i]->BSRR = data->step_release_bsrr[i];
+        }
     return 0;
 }
 
@@ -206,13 +220,13 @@ void stepper_controller_disable_interrupt(const struct device *dev)
     gpio_pin_set_dt(&cfg->step_gpios[2], 0);
 }
 
-// Reset the Step bits to low for all axes
+// Reset the Step bits to idle state for all axes
 void stepper_controller_reset_steps(const struct device *dev)
 {
-    const struct stepper_controller_config *cfg = dev->config;
-    gpio_pin_set_dt(&cfg->step_gpios[0], 0);
-    gpio_pin_set_dt(&cfg->step_gpios[1], 0);
-    gpio_pin_set_dt(&cfg->step_gpios[2], 0);
+    struct stepper_controller_data *data = dev->data;
+    data->step_ports[0]->BSRR = data->step_release_bsrr[0];
+    data->step_ports[1]->BSRR = data->step_release_bsrr[1];
+    data->step_ports[2]->BSRR = data->step_release_bsrr[2];
 }
 
 // Set the step pulse width in microseconds
@@ -277,7 +291,7 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
     return 0;
 }
 
-/* Set the Step bits high for the axes specified in the mask */
+// Set the step pins according to the step_mask (bit 0 for X, bit 1 for Y, bit 2 for Z)
 void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
 {
     if (step_mask == 0) {
@@ -289,20 +303,20 @@ void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
 
     k_spinlock_key_t key = k_spin_lock(&data->lock); // Lock to prevent concurrent access to timer and GPIOs
 
-    // Use LL_GPIO for performance
+    // Set the step pins high according to the step_mask
     if (step_mask & (1U << X_STEP_BIT))   // X
     {
-        LL_GPIO_SetOutputPin(data->step_ports[0], data->step_pin_masks[0]);
+        data->step_ports[0]->BSRR = data->step_trigger_bsrr[0];
     }
-
+   
     if (step_mask & (1U << Y_STEP_BIT))   // Y
     {
-        LL_GPIO_SetOutputPin(data->step_ports[1], data->step_pin_masks[1]);
+        data->step_ports[1]->BSRR = data->step_trigger_bsrr[1];
     }
-
+   
     if (step_mask & (1U << Z_STEP_BIT))   // Z
     {
-        LL_GPIO_SetOutputPin(data->step_ports[2], data->step_pin_masks[2]);
+        data->step_ports[2]->BSRR = data->step_trigger_bsrr[2];
     }
 
     // Schedule the reset of the step pins after the pulse width duration
