@@ -8,6 +8,7 @@
 #include "grbl_stepper_controller.h"
 #include "tcp_rx.h"
 #include "tcp_tx.h"
+#include "encoder.h"
 
 #ifndef UINT_MAX
 #define UINT_MAX 4294967295U
@@ -21,14 +22,17 @@
 #define TCP_TX_STACKSIZE 2048
 #define TCP_RX_PRIORITY 5
 #define TCP_TX_PRIORITY 5
+#define ENCODER_STACKSIZE 2048
+#define ENCODER_PRIORITY 5
 
 K_SEM_DEFINE(grbl_ready_sem, 0, 1); // Binary semaphore to signal when GRBL thread can start
 
 K_THREAD_STACK_DEFINE(tcp_rx_thread_stack, TCP_RX_STACKSIZE);
 K_THREAD_STACK_DEFINE(tcp_tx_thread_stack, TCP_TX_STACKSIZE);
+K_THREAD_STACK_DEFINE(encoder_thread_stack, ENCODER_STACKSIZE);
 static struct k_thread tcp_rx_thread_data;
 static struct k_thread tcp_tx_thread_data;
-
+static struct k_thread encoder_thread_data;
 
 void tcp_session_run(int client)
 {
@@ -61,7 +65,6 @@ void tcp_session_run(int client)
     close(client);
 }
 
-// Forward declaration of the TCP thread entry function
 static void tcp_thread_entry(void *p1, void *p2, void *p3)
 {
     ARG_UNUSED(p1);
@@ -75,7 +78,6 @@ static void tcp_thread_entry(void *p1, void *p2, void *p3)
 K_THREAD_STACK_DEFINE(tcp_thread_stack, TCP_STACKSIZE);
 static struct k_thread tcp_thread_data;
 
-// Wrapper function for the GRBL thread entry point
 void grbl_thread_entry(void *p1, void *p2, void *p3)
 {
     ARG_UNUSED(p1);
@@ -85,6 +87,18 @@ void grbl_thread_entry(void *p1, void *p2, void *p3)
     k_sem_take(&grbl_ready_sem, K_FOREVER);
 
     mainGRBL();
+}
+
+void encoder_thread_entry(void *p1, void *p2, void *p3)
+{
+        ARG_UNUSED(p1);
+        ARG_UNUSED(p2);
+        ARG_UNUSED(p3);
+  
+        while (1) {
+            encoderInterruptHandler();
+            k_msleep(1);
+        }
 }
 
 K_THREAD_DEFINE(grbl_thread_id, GRBL_STACKSIZE, grbl_thread_entry, NULL, NULL, NULL, GRBL_PRIORITY, 0, 0);
@@ -107,6 +121,13 @@ int main(void)
     
     k_sem_give(&grbl_ready_sem);
     
+    encoderInit();
+   
+    k_thread_create(&encoder_thread_data, encoder_thread_stack,
+                    K_THREAD_STACK_SIZEOF(encoder_thread_stack),
+                    encoder_thread_entry, NULL, NULL, NULL,
+                    ENCODER_PRIORITY, 0, K_NO_WAIT);
+
     while (1) {
         k_msleep(5000);
     }

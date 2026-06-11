@@ -43,7 +43,6 @@
 
 #ifdef STM32F7XX_ARCH
 #include "stm32f7xx_grbl.h"
-#include "ethernet_if.h"
 #define F_CPU 108000000
 #endif // STM32F7XX_ARCH
 
@@ -54,6 +53,22 @@
 #define F_CPU 216000000
 #define F_TIM2_CLK 108000000 // TIM2 and TIM5 clock frequency on STM32F7xx is APB1 clock frequency
 #define F_TIM1_CLK 108000000 // TIM1 clock frequency on STM32F7xx is APB2 clock frequency
+
+#define NUM_DIMENSIONS 3
+typedef uint8_t axis_t; // Define axis_t here to ensure it's available early
+typedef float encoder_degree_t[NUM_DIMENSIONS];
+typedef float encoder_position_t[NUM_DIMENSIONS];
+
+void encoderInit(void);
+void encoderInterruptHandler(void);
+void encoderResetCounter(axis_t axis);
+void encoderReadDegree(encoder_degree_t *degree);
+void encoderReadInstantDegree(encoder_degree_t *degree);
+void encoderReadPosition(encoder_position_t *position);
+void encoderReadInstantPosition(encoder_position_t *position);
+
+void startWWDG(void);
+void mainGRBL(void);
 #endif // ZEPHYR_ARCH
 
 /* type define */
@@ -64,7 +79,7 @@ typedef uint8_t IO_TYPE;
 #if defined(ZEPHYR_ARCH)
 typedef uint16_t IO_TYPE;
 #define PSTR(x) x //  AVR macro
-#ifndef M_PI      // 缺少的數學常數 (Zephyr 的 math.h 有時需要手動開啟這個)
+#ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 #endif
@@ -82,38 +97,11 @@ static inline void delay_us(uint32_t us)
 
 static inline void delay_sec(float sec, uint8_t mode)
 {
-  // GRBL 的 delay_sec 有第二個參數 mode，我們這裡暫時忽略它
+  // For now, only support delay mode of system suspend, which is used in sleep mode. In this case, we want to use k_msleep() instead of k_busy_wait() to save power.
   k_msleep((int32_t)(sec * 1000.0f));
 }
-extern uint32_t SystemCoreClock; // 要再確認
-#endif
 
-/////////////////////////////////////// 補被註解掉的encoder假函式宣告還有一些其他假函式宣告
-#ifdef ZEPHYR_ARCH
-typedef float encoder_degree_t[3];
-typedef float encoder_position_t[3];
-
-static inline void encoderReadPosition(encoder_position_t *pos)
-{
-
-  (*pos)[0] = 0.0f;
-  (*pos)[1] = 0.0f;
-  (*pos)[2] = 0.0f;
-}
-static inline void encoderReadInstantPosition(encoder_degree_t *deg)
-{
-  (*deg)[0] = 0.0f;
-  (*deg)[1] = 0.0f;
-  (*deg)[2] = 0.0f;
-}
-static inline void encoderResetCounter(uint8_t axis) {} // 空函式
-#define NUM_DIMENSIONS 3
-void flashMemcpyToEepromWithChecksum(uint32_t dest, char *source, uint32_t size);
-void flashWriteVersion(uint8_t ver);
-void startWWDG(void);
-
-#endif
-///////////////////////////////////////////////////////
+#endif // ZEPHYR_ARCH
 
 // Define the Grbl system include files. NOTE: Do not alter organization.
 #include "config.h"
@@ -144,13 +132,6 @@ void startWWDG(void);
 #include "stepper.h"
 #include "jog.h"
 
-/*#ifdef ZEPHYR_ARCH
-void mainGRBL(void *pvParameters);
-#endif // ZEPHYR_ARCH*/
-
-#ifdef ZEPHYR_ARCH
-void mainGRBL(void);
-#endif // ZEPHYR_ARCH
 
 // ---------------------------------------------------------------------------------------
 // COMPILE-TIME ERROR CHECKING OF DEFINE VALUES:

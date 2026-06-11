@@ -28,7 +28,7 @@ extern "C"
 #endif
 
 /* Includes ------------------------------------------------------------------*/
-#include < zephyr / kernel.h>
+#include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
 

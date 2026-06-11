@@ -10,6 +10,10 @@ Original project reference:
 - Zephyr OS: v4.4 (v3.7 showed performance limitations)
 - Zephyr SDK: v1.0.1
 
+## Prerequisites
+- MCU Configuration: Ensure the STM32 flash is set to **Dual Bank Mode** (via `nDBANK` Option Byte).
+- Rationale: This enables 16KB sector sizes (depending on bank), allowing the NVS storage partition to function correctly with the provided DeviceTree overlay.
+
 ## Build
 Build the project with:
 
@@ -29,9 +33,11 @@ grbl_zephyr/
 |-- Core/                                   # STM32 HAL-ported application layer
 |   |-- Inc/                                # Headers for app glue, step, encoder, timer extension
 |   `-- Src/
-|       |-- main.c                          # Zephyr app entry, creates/synchronizes GRBL thread (Zephyr-native integration)
+|       |-- main.c                          # Zephyr app entry, creates GRBL/TCP/encoder threads
 |       |-- step.c                          # Step/dir control logic (ported from STM32 HAL)
-|       |-- encoder.c                       # Encoder logic (currently HAL-style; Zephyr migration pending)
+|       |-- encoder.c                       # Encoder polling and position conversion
+|       |-- tcp_rx.c                        # TCP receive path for GRBL commands
+|       |-- tcp_tx.c                        # TCP transmit path for GRBL responses
 |       `-- stm32f7xx_timer_extension.c     # STM32F7 timer extension utilities (ported from STM32 HAL)
 |
 |-- drivers/                                # Custom Zephyr driver layer
@@ -54,9 +60,10 @@ grbl_zephyr/
 ```
 
 ### Reserved / Planned Structure
-- TCP communication stack is not integrated yet. Reserve a module path such as `app/comms/tcp/` (or `Core/Src/comms_tcp.c`) for host communication.
-- Encoder is not migrated to a Zephyr-native driver/API yet. Current code remains HAL-style in `Core/Src/encoder.c`; plan to move toward Zephyr GPIO/Counter-based implementation.
+- TCP communication is now integrated in `Core/Src/tcp_rx.c` and `Core/Src/tcp_tx.c`.
+- Encoder is still under validation. Current code in `Core/Src/encoder.c` uses a polling-based approach and needs hardware verification for reverse/count behavior.
+- Follow-up plan: confirm encoder direction/counting under real motion and which parts have not yet been migrated.
 
 ### Documentation Plan
-- This README focuses on architecture and module responsibilities.
-- File-by-file implementation changes will be documented separately in a technical supplement.
+- This README focuses on the current architecture and module responsibilities.
+- File-by-file implementation changes and migration notes will be documented separately in technical supplements.

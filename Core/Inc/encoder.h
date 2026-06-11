@@ -11,6 +11,9 @@ extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim4;
 
+#include "stm32f7xx_grbl.h"
+#include "grbl.h"
+
 /* MACROs */
 #define ENCODER_PARAM_ARRAY_INIT {    \
     {&X_ENCODER_TIM_HANDLE, 0, 0, 0}, \
@@ -23,9 +26,8 @@ typedef float encoder_degree_t[NUM_DIMENSIONS];
 typedef float encoder_position_t[NUM_DIMENSIONS];
 
 /* function prototypes */
-void encoderInit();
-void encoderReadPositionTask(void *pvParameters);
-void encoderInterruptHandler();
+void encoderInit(void);
+void encoderInterruptHandler(void);
 void encoderResetCounter(axis_t axis);
 void encoderReadDegree(encoder_degree_t *degree);
 void encoderReadInstantDegree(encoder_degree_t *degree);

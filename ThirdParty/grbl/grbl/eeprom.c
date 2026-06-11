@@ -45,11 +45,18 @@
 #include <zephyr/kvss/nvs.h>
 #include <string.h>
 #include <zephyr/storage/flash_map.h>
+#include <zephyr/devicetree/fixed-partitions.h>
+#include <zephyr/logging/log.h>
+ 
+LOG_MODULE_REGISTER(grbl_eeprom, LOG_LEVEL_INF);
 
 // Define the flash partition for NVS from the device tree.
 #define STORAGE_PARTITION_NODE DT_NODELABEL(storage_partition)
 #define NVS_PARTITION_DEVICE DEVICE_DT_GET(DT_MTD_FROM_FIXED_PARTITION(STORAGE_PARTITION_NODE))
-#define NVS_PARTITION_OFFSET DT_REG_ADDR(STORAGE_PARTITION_NODE)
+//#define NVS_PARTITION_OFFSET DT_REG_ADDR(STORAGE_PARTITION_NODE)
+#define NVS_PARTITION_OFFSET FIXED_PARTITION_OFFSET(storage_partition)
+#define NVS_PARTITION_ABS_ADDR DT_REG_ADDR(STORAGE_PARTITION_NODE)
+#define NVS_PARTITION_SIZE FIXED_PARTITION_SIZE(storage_partition)
 
 #define EEPROM_SIZE 1024
 #define NVS_ID_1 1
@@ -73,11 +80,11 @@ static void check_init(void)
 	fs.sector_count = 3U;
 
 	if (nvs_mount(&fs) == 0)
-	{
-		if (nvs_read(&fs, NVS_ID_1, eeprom_ram, EEPROM_SIZE) <= 0)
-		{
-			memset(eeprom_ram, 0xFF, EEPROM_SIZE);
-		}
+    {
+        if (nvs_read(&fs, NVS_ID_1, eeprom_ram, EEPROM_SIZE) <= 0)
+        {
+            memset(eeprom_ram, 0xFF, EEPROM_SIZE);
+        }
 	}
 	is_initialized = true;
 }

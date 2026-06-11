@@ -3,11 +3,15 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/sensor.h>
 #include "encoder.h"
 #include "grbl.h"
 
 #define FULL_COUNTER 0xFFFF
 #define HALF_COUNTER 0x7FFF
+#define FULL_16BIT_RANGE 65536
+#define HALF_16BIT_RANGE 32768
+
 // resolution of degree after decimal point
 #define DEGREE_RESOLUTION 100        // 2 decimal points
 #define PULSE_PER_REVOLUTION 2000    // 2000 pulses per revolution
@@ -19,13 +23,13 @@ void printHeapStatus(void);
 /* Type define */
 typedef struct
 {
-    TIM_HandleTypeDef *htim;
-    int32_t counter32Bit;
-    uint16_t prevCounter;
+    const struct device *dev;
+    volatile int32_t counter32Bit;
+    volatile uint16_t prevCounter;
     int16_t revolution;
 } encoder_param_t;
 
-static encoder_param_t encoder_param[NUM_DIMENSIONS] = ENCODER_PARAM_ARRAY_INIT;
+static encoder_param_t encoder_param[NUM_DIMENSIONS];
 
 volatile uint32_t previousTicks = 0;  // store previous ticks
 volatile uint32_t previousDegree = 0; // store previous degree value
@@ -33,84 +37,75 @@ volatile float speedRPM = 0;          // store speed in RPM
 
 void encoderInit()
 {
-    // Enable the encoder interrupt
-    HAL_TIM_Encoder_Start(&X_ENCODER_TIM_HANDLE, TIM_CHANNEL_ALL);
-    HAL_TIM_Encoder_Start(&Y_ENCODER_TIM_HANDLE, TIM_CHANNEL_ALL);
-    HAL_TIM_Encoder_Start(&Z_ENCODER_TIM_HANDLE, TIM_CHANNEL_ALL);
+    // Initialize encoder parameters
+    encoder_param[X_AXIS].dev = DEVICE_DT_GET(DT_ALIAS(encoder_x));
+    encoder_param[Y_AXIS].dev = DEVICE_DT_GET(DT_ALIAS(encoder_y));
+    encoder_param[Z_AXIS].dev = DEVICE_DT_GET(DT_ALIAS(encoder_z));
 
-    // reset encoder counter
-    encoderResetCounter(X_AXIS);
-    encoderResetCounter(Y_AXIS);
-    encoderResetCounter(Z_AXIS);
-
-    // start encoder read position task
-    xTaskCreate(encoderReadPositionTask, "EncoderReadPositionTask", configMINIMAL_STACK_SIZE * 2, NULL, tskIDLE_PRIORITY, NULL);
-}
-
-void encoderReadPositionTask(void *pvParameters)
-{
-
-    // Infinite loop
-    for (;;)
+    
+    for (int i = 0; i < NUM_DIMENSIONS; i++)
     {
-        // print encoder degree
-        // encoder_degree_t degree;
-        // encoderReadDegree(&degree);
-        // vLoggingPrintf("X: %.2f, Y: %.2f, Z: %.2f\n", degree[X_AXIS], degree[Y_AXIS], degree[Z_AXIS]);
-
-        // print heap status
-        // printHeapStatus();
-
-        // Delay for 1 second
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (device_is_ready(encoder_param[i].dev))
+        {
+            encoderResetCounter(i);
+        }
+        else
+        {
+            printk("Encoder device for axis %d is not ready\n", i);
+        }
     }
 }
 
 void encoderInterruptHandler()
 {
+    struct sensor_value val;
     uint16_t currentCounterArr[NUM_DIMENSIONS] = {0};
 
     // read encoder counter value of each axis at once in order to get simultaneous value
     for (uint8_t i = 0; i < NUM_DIMENSIONS; i++)
     {
         encoder_param_t *encoder = &encoder_param[i];
-        currentCounterArr[i] = __HAL_TIM_GET_COUNTER(encoder->htim);
-    }
+        if (!encoder->dev)
+            continue;
 
-    for (uint8_t i = 0; i < NUM_DIMENSIONS; i++)
-    {
-        encoder_param_t *encoder = &encoder_param[i];
-        // get current counter value
-        uint16_t currentCounter = currentCounterArr[i];
+        // fetch the latest counter value from the sensor API
+        sensor_sample_fetch(encoder->dev);
+        sensor_channel_get(encoder->dev, SENSOR_CHAN_ENCODER_COUNT, &val);
 
-        // Detect Overflow / Underflow event to Increase / Decrease revolution counter
-        int32_t diff = currentCounter - encoder->prevCounter;
+        currentCounterArr[i] = (uint16_t)val.val1;
 
-        if (diff < 0)
+        // calculate the difference between current counter and previous counter
+        int32_t diff = (int32_t)currentCounterArr[i] - (int32_t)encoder->prevCounter;
+
+        // handle overflow and underflow
+        if (diff > HALF_16BIT_RANGE)
         {
-            // overflow occurred
-            if (-diff > HALF_COUNTER)
-                encoder->revolution++;
+            diff -= FULL_16BIT_RANGE;
         }
-        else
+        else if (diff < -HALF_16BIT_RANGE)
         {
-            // underflow occurred
-            if (diff > HALF_COUNTER)
-                encoder->revolution--;
+            diff += FULL_16BIT_RANGE;
         }
 
-        encoder->counter32Bit = (int32_t)(encoder->revolution << 16) + currentCounter;
-        encoder->prevCounter = currentCounter;
+        encoder->counter32Bit += diff;
+        encoder->prevCounter = currentCounterArr[i];
     }
 }
 
 void encoderResetCounter(axis_t axis)
 {
-    encoder_param[axis].counter32Bit = 0;
-    encoder_param[axis].prevCounter = 0;
-    encoder_param[axis].revolution = 0;
+    struct sensor_value val;
+    encoder_param_t *encoder = &encoder_param[axis];
 
-    __HAL_TIM_SET_COUNTER(encoder_param[axis].htim, 0);
+    if (!encoder->dev)
+        return;
+
+    encoder->revolution = 0;
+    encoder->counter32Bit = 0;
+
+    sensor_sample_fetch(encoder->dev);
+    sensor_channel_get(encoder->dev, SENSOR_CHAN_ENCODER_COUNT, &val);
+    encoder->prevCounter = (uint16_t)val.val1;
 }
 
 /**
@@ -133,7 +128,7 @@ void encoderReadDegree(encoder_degree_t *degree)
 void encoderReadInstantDegree(encoder_degree_t *degree)
 {
     // update counter value
-    encoderInterruptHandler();
+    // encoderInterruptHandler();
 
     // read degree value
     encoderReadDegree(degree);
@@ -146,7 +141,7 @@ void encoderReadPosition(encoder_position_t *position)
 
     for (uint8_t i = 0; i < NUM_DIMENSIONS; i++)
     {
-        ((float *)position)[i] = settings.mm_per_rev[i] * (deg[i] / 360.0);
+        ((float *)position)[i] = settings.mm_per_rev[i] * (deg[i] / 360.0f);
     }
 }
 
@@ -157,7 +152,7 @@ void encoderReadInstantPosition(encoder_position_t *position)
 
     for (uint8_t i = 0; i < NUM_DIMENSIONS; i++)
     {
-        ((float *)position)[i] = settings.mm_per_rev[i] * (deg[i] / 360.0);
+        ((float *)position)[i] = settings.mm_per_rev[i] * (deg[i] / 360.0f);
     }
 }
 
@@ -165,14 +160,14 @@ void encoderReadInstantPosition(encoder_position_t *position)
 void printHeapStatus(void)
 {
     // Get the current free heap size
-    size_t freeHeapSize = xPortGetFreeHeapSize();
+    // size_t freeHeapSize = xPortGetFreeHeapSize();
 
     // Get the minimum free heap size ever recorded
-    size_t minEverFreeHeapSize = xPortGetMinimumEverFreeHeapSize();
+    // size_t minEverFreeHeapSize = xPortGetMinimumEverFreeHeapSize();
 
     // Print the heap sizes
-    vLoggingPrintf("Current free heap size: %u bytes\n", (unsigned int)freeHeapSize);
-    vLoggingPrintf("Minimum ever free heap size: %u bytes\n", (unsigned int)minEverFreeHeapSize);
+    // vLoggingPrintf("Current free heap size: %u bytes\n", (unsigned int)freeHeapSize);
+    // vLoggingPrintf("Minimum ever free heap size: %u bytes\n", (unsigned int)minEverFreeHeapSize);
 }
 
 /**
