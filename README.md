@@ -59,11 +59,13 @@ grbl_zephyr/
 `-- README.md
 ```
 
-### Reserved / Planned Structure
-- TCP communication is now integrated in `Core/Src/tcp_rx.c` and `Core/Src/tcp_tx.c`.
-- Encoder is still under validation. Current code in `Core/Src/encoder.c` uses a polling-based approach and needs hardware verification for reverse/count behavior.
-- Follow-up plan: confirm encoder direction/counting under real motion and which parts have not yet been migrated.
+### Current Progress
+- TCP communication is integrated in `Core/Src/tcp_rx.c` and `Core/Src/tcp_tx.c`.
+- Encoder support exists in `Core/Src/encoder.c`.
+- Encoder hardware testing has been completed.
+- Default IP/Port values are still defined in GRBL settings, but they are not yet wired to a runtime switch that changes the Zephyr network address.
+- The board-button fallback for default IP/Port settings from `README_stm32f7xx_grbl.md` is not implemented yet, so the LD1/LD2 blink confirmation path is also still missing.
 
 ### Documentation Plan
 - This README focuses on the current architecture and module responsibilities.
-- File-by-file implementation changes and migration notes will be documented separately in technical supplements.
+- File-by-file implementation changes and migration notes will continue to be documented separately in technical supplements.
