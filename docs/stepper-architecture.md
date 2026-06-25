@@ -136,9 +136,9 @@ Current status:
 ```mermaid
 sequenceDiagram
     participant TIM2 as TIM2 HW Timer
-    participant ISR as stepper_timer_isr()<br/>drivers/grbl_stepper_controller.c
-    participant GRBL as stepper_driver_interrupt_handler()<br/>ThirdParty/grbl/grbl/stepper.c
-    participant DRV as stepper_controller_* API<br/>drivers/grbl_stepper_controller.c
+    participant ISR as "stepper_timer_isr()<br/>drivers/grbl_stepper_controller.c"
+    participant GRBL as "stepper_driver_interrupt_handler()<br/>ThirdParty/grbl/grbl/stepper.c"
+    participant DRV as "stepper_controller_* API<br/>drivers/grbl_stepper_controller.c"
     participant GPIO as Step GPIO Pins (X/Y/Z)
 
     TIM2->>ISR: CC1 compare event
@@ -167,13 +167,13 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[Limit switch hit during homing] --> B[limits.c calls stepBlockAxis(axis)]
-    B --> C{axis < N_AXIS?}
-    C -- No --> Z[Return]
-    C -- Yes --> D[Software layer:<br/>sys.homing_axis_lock &= ~get_step_pin_mask(axis)]
-    D --> E{stepper_dev ready?}
+    A["Limit switch hit during homing"] --> B["limits.c calls stepBlockAxis(axis)"]
+    B --> C{"axis < N_AXIS?"}
+    C -- No --> Z["Return"]
+    C -- Yes --> D["Software layer:<br/>sys.homing_axis_lock &= ~get_step_pin_mask(axis)"]
+    D --> E{"stepper_dev ready?"}
     E -- No --> Z
-    E -- Yes --> F[Hardware layer:<br/>stepper_controller_clear_steps(dev, axis_mask)]
-    F --> G[Physical STEP pin forced LOW]
+    E -- Yes --> F["Hardware layer:<br/>stepper_controller_clear_steps(dev, axis_mask)"]
+    F --> G["Physical STEP pin forced LOW"]
     G --> Z
 ```
