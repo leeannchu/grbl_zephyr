@@ -68,7 +68,7 @@ struct stepper_controller_data
     struct k_spinlock lock;
     uint32_t flags;
     uint32_t step_pulse_width_cycles;
-    uint32_t last_cc1_fired;  // Timestamp of last CC1 interrupt (when CCR1 matched CNT)
+    uint32_t last_cc1_fired; // Timestamp of last CC1 interrupt (when CCR1 matched CNT)
     GPIO_TypeDef *step_ports[3];
     uint32_t step_pin_masks[3];
     uint32_t step_trigger_bsrr[3]; // Pre-computed BSRR value for pulse trigger (Active Low/High aware)
@@ -97,10 +97,10 @@ static void stepper_timer_isr(void *arg)
         // This is the reference point for the next period scheduling
         // Read CCR1 register directly from the timer instance
         uint32_t cc1_timestamp = cfg->timer_instance->CCR1;
-        
+
         // Clear the CC1 interrupt flag
         LL_TIM_ClearFlag_CC1(cfg->timer_instance);
-        
+
         // Store the CC1 fire time for period calculation (will be used in set_period)
         k_spinlock_key_t key = k_spin_lock(&data->lock);
         data->last_cc1_fired = cc1_timestamp;
@@ -114,7 +114,7 @@ static void stepper_timer_isr(void *arg)
     if (LL_TIM_IsActiveFlag_CC2(cfg->timer_instance))
     {
         LL_TIM_ClearFlag_CC2(cfg->timer_instance);
-        
+
         // Reset the step pins to low after the pulse duration
         stepper_controller_reset_steps(dev);
 
@@ -141,21 +141,21 @@ static int stepper_controller_init(const struct device *dev)
         gpio_pin_configure_dt(&cfg->step_gpios[i], GPIO_OUTPUT_INACTIVE); // Configure pin as Output and set it to Inactive (Low) initially
     }
 
-    LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM2); // Enable Timer Clock
-    LL_APB1_GRP1_ForceReset(LL_APB1_GRP1_PERIPH_TIM2); // Reset Timer
+    LL_APB1_GRP1_EnableClock(LL_APB1_GRP1_PERIPH_TIM2);  // Enable Timer Clock
+    LL_APB1_GRP1_ForceReset(LL_APB1_GRP1_PERIPH_TIM2);   // Reset Timer
     LL_APB1_GRP1_ReleaseReset(LL_APB1_GRP1_PERIPH_TIM2); // Release Reset
 
-    LL_TIM_SetPrescaler(cfg->timer_instance, 0); // No prescaling, timer runs at full speed (System Core Clock)
-    LL_TIM_SetAutoReload(cfg->timer_instance, 0xFFFFFFFF); // Max 32-bit
+    LL_TIM_SetPrescaler(cfg->timer_instance, 0);                       // No prescaling, timer runs at full speed (System Core Clock)
+    LL_TIM_SetAutoReload(cfg->timer_instance, 0xFFFFFFFF);             // Max 32-bit
     LL_TIM_SetCounterMode(cfg->timer_instance, LL_TIM_COUNTERMODE_UP); // Upcounting mode
 
-    LL_TIM_SetCounter(cfg->timer_instance, 0); // Set Counter to 0
+    LL_TIM_SetCounter(cfg->timer_instance, 0);                                        // Set Counter to 0
     LL_TIM_OC_SetMode(cfg->timer_instance, LL_TIM_CHANNEL_CH1, LL_TIM_OCMODE_FROZEN); // Output Compare Mode: Frozen
     LL_TIM_OC_SetMode(cfg->timer_instance, LL_TIM_CHANNEL_CH2, LL_TIM_OCMODE_FROZEN); // Output Compare Mode: Frozen
-    
+
     LL_TIM_OC_SetCompareCH1(cfg->timer_instance, 0); // Initial Compare Value
     LL_TIM_OC_SetCompareCH2(cfg->timer_instance, 0);
-    
+
     data->last_cc1_fired = 0; // Initialize CC1 fire timestamp
 
     IRQ_CONNECT(STEPPER_TIMER_IRQN, 0, stepper_timer_isr, DEVICE_DT_INST_GET(STEPPER_INST), 0); // Connect the timer interrupt to the ISR
@@ -178,17 +178,21 @@ static int stepper_controller_init(const struct device *dev)
     data->step_pin_masks[2] = LL_GPIO_PIN_0;
 
     // Pre-compute BSRR values for step trigger and release based on active low/high configuration
-     for (int i = 0; i < 3; i++) {
-            uint32_t pin_mask = data->step_pin_masks[i];
-            if (cfg->step_gpios[i].dt_flags & GPIO_ACTIVE_LOW) {
-                data->step_trigger_bsrr[i] = pin_mask << 16;
-                data->step_release_bsrr[i] = pin_mask;
-            } else {
-                data->step_trigger_bsrr[i] = pin_mask;
-                data->step_release_bsrr[i] = pin_mask << 16;
-            }
-            data->step_ports[i]->BSRR = data->step_release_bsrr[i];
+    for (int i = 0; i < 3; i++)
+    {
+        uint32_t pin_mask = data->step_pin_masks[i];
+        if (cfg->step_gpios[i].dt_flags & GPIO_ACTIVE_LOW)
+        {
+            data->step_trigger_bsrr[i] = pin_mask << 16;
+            data->step_release_bsrr[i] = pin_mask;
         }
+        else
+        {
+            data->step_trigger_bsrr[i] = pin_mask;
+            data->step_release_bsrr[i] = pin_mask << 16;
+        }
+        data->step_ports[i]->BSRR = data->step_release_bsrr[i];
+    }
     return 0;
 }
 
@@ -250,11 +254,11 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
         k_spin_unlock(&data->lock, key);
         return -EINVAL;
     }
-    
+
     // Base the next compare point on the last CC1 fire time, not the current counter
     uint32_t next_cc1 = data->last_cc1_fired + cycles;
     uint32_t current_cnt = LL_TIM_GetCounter(cfg->timer_instance);
-    
+
     // If next deadline is already in the past, catch up by whole periods and keep phase continuity.
     if (tim_reached_or_passed(current_cnt, next_cc1))
     {
@@ -275,7 +279,7 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
             next_cc1 += skip * cycles;
         }
     }
-    
+
     LL_TIM_OC_SetCompareCH1(cfg->timer_instance, next_cc1);
 
     // Final safety net: if an ISR preempted us and we still missed the compare point, force the next period from "now" to avoid waiting until counter wrap.
@@ -286,7 +290,7 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
             LL_TIM_OC_SetCompareCH1(cfg->timer_instance, now_after_write + cycles);
         }
     }
-    
+
     k_spin_unlock(&data->lock, key);
     return 0;
 }
@@ -294,7 +298,8 @@ int stepper_controller_set_period(const struct device *dev, uint32_t cycles)
 // Set the step pins according to the step_mask (bit 0 for X, bit 1 for Y, bit 2 for Z)
 void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
 {
-    if (step_mask == 0) {
+    if (step_mask == 0)
+    {
         return; // No steps to set
     }
 
@@ -304,17 +309,17 @@ void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
     k_spinlock_key_t key = k_spin_lock(&data->lock); // Lock to prevent concurrent access to timer and GPIOs
 
     // Set the step pins high according to the step_mask
-    if (step_mask & (1U << X_STEP_BIT))   // X
+    if (step_mask & (1U << X_STEP_BIT)) // X
     {
         data->step_ports[0]->BSRR = data->step_trigger_bsrr[0];
     }
-   
-    if (step_mask & (1U << Y_STEP_BIT))   // Y
+
+    if (step_mask & (1U << Y_STEP_BIT)) // Y
     {
         data->step_ports[1]->BSRR = data->step_trigger_bsrr[1];
     }
-   
-    if (step_mask & (1U << Z_STEP_BIT))   // Z
+
+    if (step_mask & (1U << Z_STEP_BIT)) // Z
     {
         data->step_ports[2]->BSRR = data->step_trigger_bsrr[2];
     }
@@ -322,20 +327,20 @@ void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
     // Schedule the reset of the step pins after the pulse width duration
     uint32_t current_cnt = LL_TIM_GetCounter(cfg->timer_instance);
     uint32_t target_cnt = current_cnt + data->step_pulse_width_cycles;
-    
+
     // Disable CC2 interrupt first in case it's still active from previous step
     LL_TIM_DisableIT_CC2(cfg->timer_instance);
     LL_TIM_ClearFlag_CC2(cfg->timer_instance);
-    
+
     // Set the compare value for CC2
     LL_TIM_OC_SetCompareCH2(cfg->timer_instance, target_cnt);
-    
+
     // Check if we already passed the target time
     uint32_t check_cnt = LL_TIM_GetCounter(cfg->timer_instance);
     if (tim_reached_or_passed(check_cnt, target_cnt))
     {
         // Already passed the target time, reset GPIO immediately
-        LOG_WRN("Pulse width setting too short for interrupt-based control, using direct reset. Missed by %u cycles", 
+        LOG_WRN("Pulse width setting too short for interrupt-based control, using direct reset. Missed by %u cycles",
                 check_cnt - target_cnt);
         gpio_pin_set_dt(&cfg->step_gpios[0], 0);
         gpio_pin_set_dt(&cfg->step_gpios[1], 0);
@@ -346,7 +351,7 @@ void stepper_controller_set_steps(const struct device *dev, uint16_t step_mask)
         // Haven't passed yet, enable CC2 interrupt to reset later
         LL_TIM_EnableIT_CC2(cfg->timer_instance);
     }
-    
+
     k_spin_unlock(&data->lock, key);
 }
 
@@ -362,21 +367,32 @@ void stepper_controller_clear_steps(const struct device *dev, uint16_t step_mask
 
     k_spinlock_key_t key = k_spin_lock(&data->lock);
 
-    if (step_mask & (1U << X_STEP_BIT))   // X
+    if (step_mask & (1U << X_STEP_BIT)) // X
     {
         gpio_pin_set_dt(&cfg->step_gpios[0], 0);
     }
 
-    if (step_mask & (1U << Y_STEP_BIT))   // Y
+    if (step_mask & (1U << Y_STEP_BIT)) // Y
     {
         gpio_pin_set_dt(&cfg->step_gpios[1], 0);
     }
 
-    if (step_mask & (1U << Z_STEP_BIT))   // Z
+    if (step_mask & (1U << Z_STEP_BIT)) // Z
     {
         gpio_pin_set_dt(&cfg->step_gpios[2], 0);
     }
 
+    k_spin_unlock(&data->lock, key);
+}
+
+// Force the Timer base time to be synchronized to the present (for use when waking from IDLE).
+void stepper_controller_sync_timer(const struct device *dev)
+{
+    const struct stepper_controller_config *cfg = dev->config;
+    struct stepper_controller_data *data = dev->data;
+
+    k_spinlock_key_t key = k_spin_lock(&data->lock);
+    data->last_cc1_fired = LL_TIM_GetCounter(cfg->timer_instance);
     k_spin_unlock(&data->lock, key);
 }
 

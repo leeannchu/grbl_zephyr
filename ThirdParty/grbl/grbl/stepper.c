@@ -34,7 +34,7 @@ static const struct gpio_dt_spec z_dir = GPIO_DT_SPEC_GET(DT_ALIAS(z_dir), gpios
 static const struct gpio_dt_spec step_disable = GPIO_DT_SPEC_GET(DT_ALIAS(step_disable), gpios);
 
 static struct k_work_delayable stepper_disable_work; // Delayed work item for disabling stepper drivers after idle lock time
-static bool stepper_disable_scheduled = false; // Flag to track if the stepper disable work is already scheduled
+static bool stepper_disable_scheduled = false;       // Flag to track if the stepper disable work is already scheduled
 #endif
 
 // Some useful constants.
@@ -63,10 +63,10 @@ static bool stepper_disable_scheduled = false; // Flag to track if the stepper d
 #define MAX_AMASS_LEVEL 3
 // AMASS_LEVEL0: Normal operation. No AMASS. No upper cutoff frequency. Starts at LEVEL1 cutoff frequency.
 #if defined(AVR_ARCH)
-#define AMASS_LEVEL1 (F_CPU / 8000)           // Over-drives ISR (x2). Defined as F_CPU/(Cutoff frequency in Hz)
-#define AMASS_LEVEL2 (F_CPU / 4000)           // Over-drives ISR (x4)
-#define AMASS_LEVEL3 (F_CPU / 2000)           // Over-drives ISR (x8)
-#elif defined(ZEPHYR_ARCH)                    // F_CPU = 108MHz for STM32F7XX which is the clock frequency of APB1 for TIM2 and TIM5
+#define AMASS_LEVEL1 (F_CPU / 8000)                // Over-drives ISR (x2). Defined as F_CPU/(Cutoff frequency in Hz)
+#define AMASS_LEVEL2 (F_CPU / 4000)                // Over-drives ISR (x4)
+#define AMASS_LEVEL3 (F_CPU / 2000)                // Over-drives ISR (x8)
+#elif defined(ZEPHYR_ARCH)                         // F_CPU = 108MHz for STM32F7XX which is the clock frequency of APB1 for TIM2 and TIM5
 #define AMASS_LEVEL1 (uint32_t)(F_TIM2_CLK / 8000) // Over-drives ISR (x2). Defined as F_CPU/(Cutoff frequency in Hz)
 #define AMASS_LEVEL2 (uint32_t)(F_TIM2_CLK / 4000) // Over-drives ISR (x4)
 #define AMASS_LEVEL3 (uint32_t)(F_TIM2_CLK / 2000) // Over-drives ISR (x8)
@@ -82,13 +82,13 @@ error "AMASS must have 1 or more levels to operate correctly."
 #endif
 #endif
 
-// Stores the planner block Bresenham algorithm execution data for the segments in the segment
+    // Stores the planner block Bresenham algorithm execution data for the segments in the segment
     // buffer. Normally, this buffer is partially in-use, but, for the worst case scenario, it will
     // never exceed the number of accessible stepper buffer segments (SEGMENT_BUFFER_SIZE-1).
     // NOTE: This data is copied from the prepped planner blocks so that the planner blocks may be
     // discarded when entirely consumed and completed by the segment buffer. Also, AMASS alters this
     // data for its own use.
-typedef struct
+    typedef struct
 {
   uint32_t steps[N_AXIS];
   uint32_t step_event_count;
@@ -224,18 +224,20 @@ static st_prep_t prep;
 #ifdef ZEPHYR_ARCH
 static void stepper_disable_work_handler(struct k_work *work) // Delayed work handler to disable stepper drivers after idle lock time
 {
-  if (!busy && segment_buffer_head == segment_buffer_tail) {
+  if (!busy && segment_buffer_head == segment_buffer_tail)
+  {
     bool pin_state = true; // Disable steppers
-    
+
     if (bit_istrue(settings.flags, BITFLAG_INVERT_ST_ENABLE))
     {
       pin_state = !pin_state;
     }
-    if (gpio_is_ready_dt(&step_disable)) {
+    if (gpio_is_ready_dt(&step_disable))
+    {
       gpio_pin_set_dt(&step_disable, pin_state ? 1 : 0);
     }
   }
-  
+
   stepper_disable_scheduled = false;
 }
 #endif
@@ -282,9 +284,10 @@ static void stepper_disable_work_handler(struct k_work *work) // Delayed work ha
 // enabled. Startup init and limits call this function but shouldn't start the cycle.
 void st_wake_up()
 {
-  // If the stepper disable work is scheduled, cancel it to prevent unintended disabling of steppers during active motion.
-  #ifdef ZEPHYR_ARCH
-  if (stepper_disable_scheduled) {
+// If the stepper disable work is scheduled, cancel it to prevent unintended disabling of steppers during active motion.
+#ifdef ZEPHYR_ARCH
+  if (stepper_disable_scheduled)
+  {
     k_work_cancel_delayable(&stepper_disable_work);
     stepper_disable_scheduled = false;
   }
@@ -294,7 +297,8 @@ void st_wake_up()
   {
     pin_state = !pin_state;
   }
-  if (gpio_is_ready_dt(&step_disable)) {
+  if (gpio_is_ready_dt(&step_disable))
+  {
     gpio_pin_set_dt(&step_disable, pin_state ? 1 : 0);
   }
 #endif
@@ -334,8 +338,10 @@ void st_wake_up()
 #if defined(AVR_ARCH)
   TIMSK1 |= (1 << OCIE1A);
 #elif defined(ZEPHYR_ARCH)
-  // Kickstart timer with 1ms initial delay (1000 ticks at 1MHz)
-  stepper_controller_set_period(stepper_dev, 1000);
+  // Synchronize the base time(last_cc1_fired) to ensure that old values ​​from a few seconds ago are not captured.
+  stepper_controller_sync_timer(stepper_dev);
+  // Kickstart timer with 0.1ms initial delay (100 ticks at 1MHz)
+  stepper_controller_set_period(stepper_dev, 100);
   stepper_controller_enable_interrupt(stepper_dev);
 #endif // AVR_ARCH
 }
@@ -355,12 +361,13 @@ void st_go_idle()
 
   busy = false;
 
- #if defined(ZEPHYR_ARCH)
-  if (stepper_disable_scheduled) {
+#if defined(ZEPHYR_ARCH)
+  if (stepper_disable_scheduled)
+  {
     k_work_cancel_delayable(&stepper_disable_work);
     stepper_disable_scheduled = false;
   }
-  
+
   if (((settings.stepper_idle_lock_time != 0xff) || sys_rt_exec_alarm || sys.state == STATE_SLEEP) && sys.state != STATE_HOMING)
   {
     k_work_schedule(&stepper_disable_work, K_MSEC(settings.stepper_idle_lock_time));
@@ -373,23 +380,24 @@ void st_go_idle()
     {
       pin_state = !pin_state;
     }
-    if (gpio_is_ready_dt(&step_disable)) {
+    if (gpio_is_ready_dt(&step_disable))
+    {
       gpio_pin_set_dt(&step_disable, pin_state ? 1 : 0);
     }
   }
-  #elif defined(AVR_ARCH)
+#elif defined(AVR_ARCH)
   bool pin_state = false;
   if (((settings.stepper_idle_lock_time != 0xff) || sys_rt_exec_alarm || sys.state == STATE_SLEEP) && sys.state != STATE_HOMING)
   {
     delay_ms(settings.stepper_idle_lock_time);
     pin_state = true;
   }
-  
+
   if (bit_istrue(settings.flags, BITFLAG_INVERT_ST_ENABLE))
   {
     pin_state = !pin_state;
   }
-  
+
   if (pin_state)
   {
     STEPPERS_DISABLE_PORT |= (1 << STEPPERS_DISABLE_BIT);
@@ -398,7 +406,7 @@ void st_go_idle()
   {
     STEPPERS_DISABLE_PORT &= ~(1 << STEPPERS_DISABLE_BIT);
   }
-  #endif
+#endif
 }
 
 /* "The Stepper Driver Interrupt" - This timer interrupt is the workhorse of Grbl. Grbl employs
@@ -490,7 +498,8 @@ void stepper_driver_interrupt_handler(void)
   TCCR0B = (1 << CS01);       // Begin Timer0. Full speed, 1/8 prescaler
 #elif defined(ZEPHYR_ARCH)
   // Set the direction pins before we step the steppers, only if they have changed.
-  if (st.dir_outbits != st.last_dir_outbits) {
+  if (st.dir_outbits != st.last_dir_outbits)
+  {
     /*// X-Axis Direction
     if (st.dir_outbits & (1 << X_DIRECTION_BIT)) { LL_GPIO_SetOutputPin(x_dir_port, x_dir.pin); }
     else { LL_GPIO_ResetOutputPin(x_dir_port, x_dir.pin); }
@@ -505,7 +514,7 @@ void stepper_driver_interrupt_handler(void)
     gpio_pin_set_dt(&x_dir, (st.dir_outbits & (1 << X_DIRECTION_BIT)) ? 1 : 0);
     gpio_pin_set_dt(&y_dir, (st.dir_outbits & (1 << Y_DIRECTION_BIT)) ? 1 : 0);
     gpio_pin_set_dt(&z_dir, (st.dir_outbits & (1 << Z_DIRECTION_BIT)) ? 1 : 0);
-    
+
     st.last_dir_outbits = st.dir_outbits;
   }
   stepper_controller_set_steps(stepper_dev, st.step_outbits); // Set the step pins
@@ -517,7 +526,7 @@ void stepper_driver_interrupt_handler(void)
 #if defined(AVR_ARCH)
   sei(); // Re-enable interrupts to allow Stepper Port Reset Interrupt to fire on-time.
          // NOTE: The remaining code in this ISR will finish before returning to main program.
-#endif // AVR_ARCH
+#endif   // AVR_ARCH
 
   // If there is no step segment, attempt to pop one from the stepper buffer
   if (st.exec_segment == NULL)
@@ -647,19 +656,19 @@ void stepper_driver_interrupt_handler(void)
     else
     {
       sys_position[X_AXIS]++;
-/*#if defined(ZEPHYR_ARCH)
-      // check if homing cycle is active
-      if (sys.state != STATE_HOMING)
-      {
-        // check if limits has been hit
-        if (limits_get_state() & (1 << X_AXIS))
-        {
-          // check moving axis and direction, if moving in the direction of the limit switch, then stop
-          mc_reset();                                   // Initiate system kill.
-          system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
-        }
-      }
-#endif*/
+      /*#if defined(ZEPHYR_ARCH)
+            // check if homing cycle is active
+            if (sys.state != STATE_HOMING)
+            {
+              // check if limits has been hit
+              if (limits_get_state() & (1 << X_AXIS))
+              {
+                // check moving axis and direction, if moving in the direction of the limit switch, then stop
+                mc_reset();                                   // Initiate system kill.
+                system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
+              }
+            }
+      #endif*/
     }
   }
 #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
@@ -670,7 +679,7 @@ void stepper_driver_interrupt_handler(void)
   if (st.counter_y > st.exec_block->step_event_count)
   {
     // set DEBUG_3_PIN high
-    //UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_SET);
+    // UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_SET);
 
     st.step_outbits |= (1 << Y_STEP_BIT);
 #if defined(ENABLE_DUAL_AXIS) && (DUAL_AXIS_SELECT == Y_AXIS)
@@ -684,23 +693,23 @@ void stepper_driver_interrupt_handler(void)
     else
     {
       sys_position[Y_AXIS]++;
-/*#if defined(ZEPHYR_ARCH)
-      // check if homing cycle is active
-      if (sys.state != STATE_HOMING)
-      {
-        // check if limits has been hit
-        if (limits_get_state() & (1 << Y_AXIS))
-        {
-          // check moving axis and direction, if moving in the direction of the limit switch, then stop
-          mc_reset();                                   // Initiate system kill.
-          system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
-        }
-      }
-#endif*/
+      /*#if defined(ZEPHYR_ARCH)
+            // check if homing cycle is active
+            if (sys.state != STATE_HOMING)
+            {
+              // check if limits has been hit
+              if (limits_get_state() & (1 << Y_AXIS))
+              {
+                // check moving axis and direction, if moving in the direction of the limit switch, then stop
+                mc_reset();                                   // Initiate system kill.
+                system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
+              }
+            }
+      #endif*/
     }
 
     // set DEBUG_3_PIN low
-    //UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_RESET);
+    // UTILS_WRITE_GPIO(DEBUG_3_GPIO_Port, DEBUG_3_Pin, GPIO_PIN_RESET);
   }
 #ifdef ADAPTIVE_MULTI_AXIS_STEP_SMOOTHING
   st.counter_z += st.steps[Z_AXIS];
@@ -718,19 +727,19 @@ void stepper_driver_interrupt_handler(void)
     else
     {
       sys_position[Z_AXIS]++;
-/*#if defined(ZEPHYR_ARCH)
-      // check if homing cycle is active
-      if (sys.state != STATE_HOMING)
-      {
-        // check if limits has been hit
-        if (limits_get_state() & (1 << Z_AXIS))
-        {
-          // check moving axis and direction, if moving in the direction of the limit switch, then stop
-          mc_reset();                                   // Initiate system kill.
-          system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
-        }
-      }
-#endif*/
+      /*#if defined(ZEPHYR_ARCH)
+            // check if homing cycle is active
+            if (sys.state != STATE_HOMING)
+            {
+              // check if limits has been hit
+              if (limits_get_state() & (1 << Z_AXIS))
+              {
+                // check moving axis and direction, if moving in the direction of the limit switch, then stop
+                mc_reset();                                   // Initiate system kill.
+                system_set_exec_alarm(EXEC_ALARM_HARD_LIMIT); // Indicate hard limit critical event
+              }
+            }
+      #endif*/
     }
   }
 
@@ -744,7 +753,7 @@ void stepper_driver_interrupt_handler(void)
   }
 
   // set DEBUG_4_PIN high
-  //UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_SET);
+  // UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_SET);
   st.step_count--; // Decrement step events count
   if (st.step_count == 0)
   {
@@ -756,7 +765,7 @@ void stepper_driver_interrupt_handler(void)
     }
   }
   // set DEBUG_4_PIN low
-  //UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_RESET);
+  // UTILS_WRITE_GPIO(DEBUG_4_GPIO_Port, DEBUG_4_Pin, GPIO_PIN_RESET);
 
   st.step_outbits ^= step_port_invert_mask; // Apply step port invert mask
 #ifdef ENABLE_DUAL_AXIS
@@ -902,14 +911,19 @@ void stepper_init()
   TIMSK0 |= (1 << OCIE0A); // Enable Timer0 Compare Match A interrupt
 #endif
 #elif defined(ZEPHYR_ARCH)
-  if (!device_is_ready(stepper_dev)) {
-      return;
+  if (!device_is_ready(stepper_dev))
+  {
+    return;
   }
-  if (gpio_is_ready_dt(&x_dir)) gpio_pin_configure_dt(&x_dir, GPIO_OUTPUT_INACTIVE);
-  if (gpio_is_ready_dt(&y_dir)) gpio_pin_configure_dt(&y_dir, GPIO_OUTPUT_INACTIVE);
-  if (gpio_is_ready_dt(&z_dir)) gpio_pin_configure_dt(&z_dir, GPIO_OUTPUT_INACTIVE);
-  if (gpio_is_ready_dt(&step_disable)) gpio_pin_configure_dt(&step_disable, GPIO_OUTPUT_ACTIVE);
-  
+  if (gpio_is_ready_dt(&x_dir))
+    gpio_pin_configure_dt(&x_dir, GPIO_OUTPUT_INACTIVE);
+  if (gpio_is_ready_dt(&y_dir))
+    gpio_pin_configure_dt(&y_dir, GPIO_OUTPUT_INACTIVE);
+  if (gpio_is_ready_dt(&z_dir))
+    gpio_pin_configure_dt(&z_dir, GPIO_OUTPUT_INACTIVE);
+  if (gpio_is_ready_dt(&step_disable))
+    gpio_pin_configure_dt(&step_disable, GPIO_OUTPUT_ACTIVE);
+
   k_work_init_delayable(&stepper_disable_work, stepper_disable_work_handler);
   stepper_disable_scheduled = false;
 #endif // AVR_ARCH
@@ -1584,4 +1598,3 @@ float st_get_realtime_rate()
   }
   return 0.0f;
 }
-
